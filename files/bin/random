@@ -1,0 +1,163 @@
+#!/usr/bin/perl -w
+use strict; use warnings; use 5.010;
+
+use Getopt::Long qw/:config bundling/;
+use Hash::Util qw/ lock_keys /;
+our $VERSION = '0.0000';# Created: 2013-01-17
+
+our %OPT = (  );
+our @OPT_SPEC =
+qw/
+      help|h version noact|no-act|dry-run DEBUG
+      nonempty! noncomment!
+  /;
+sub USAGE { <<"__USAGE__" };
+usage: $_[0] [options] <NUMBER>
+       $_[0] [options] <OPTIONS>
+       $_[0] [options] <FILE>
+       $_[0] [options] ACTION ARG(S)
+
+ACTIONS
+
+  $_[0] crontime
+    time when you might want to schedule cronjobs
+
+  $_[0] port
+    unpriviliged port number not present in /etc/services
+
+  $_[0] number <N>
+  $_[0] number <N>..<M>
+  $_[0] number <N>:<M>
+  $_[0] number <N>:<step>:<M>
+    number
+
+  $_[0] item <OPTIONS>
+    item from the list of options
+
+  $_[0] line <FILE(S)>
+  $_[0] --nonempty --noncomment line <FILE(S)>
+    line from the given file
+__USAGE__
+
+use Path::Class;
+use Dean::Util qw/ simple_range2list /;
+
+our %ACTIONS; sub action;
+action help => sub { usage() };
+
+
+action [qw/ cron crontime /] => sub {
+    my ($action, @args) = @_;
+    my @hour = (23,0..5);
+    my @min  = (0..59);
+    my $hour = $hour[rand @hour];
+    my $min  = $min[rand @min];
+    say "$min $hour * * *";
+};
+
+action item => sub {
+    my ($action, @args) = @_;
+    say $args[rand @args];
+};
+
+action line => sub {
+    my ($action, @args) = @_;
+
+    my $i = 1;
+    my $line;
+    for my $file (@args) {
+        open my $F, "<", $file or die "Could not read $file: $!";
+        while (<$F>) {
+            next if $OPT{nonempty}   and !/\S/;
+            next if $OPT{noncomment} and /^\s*#/;
+            $line = $_ if rand($i++) < 1;
+        }
+    }
+    $line =~ s/(?:\015?\012|\015)+//;
+    say $line;
+};
+
+action number => sub {
+    my ($action, @args) = @_;
+    my @items = simple_range2list(@args);
+    say $items[rand @items];
+};
+
+action port => sub {
+    my ($action, @args) = @_;
+    my %bad = map { /^\w\S+\s+(\d+)/ ? ( $1 => 1 ) : () } file("/etc/services")->slurp;
+    my $port = 0;
+    while ($port < 1024 or $bad{$port}) {
+        $port = int rand 65536;
+    }
+    say $port;
+};
+
+
+get_options( \%OPT, @OPT_SPEC );
+
+my $action;
+# An existing action name trumps everything
+if (exists $ACTIONS{$ARGV[0]}) {
+    $action = shift @ARGV;
+}
+# Failing that, multiple items always triggers an item randomization
+elsif (@ARGV > 1) {
+    $action = "item";
+}
+# If it is a file name, choose a random line
+elsif (-f $ARGV[0]) {
+    $action = "line";
+}
+# If it looks like a range specification
+elsif (
+    $ARGV[0] =~ /^(?:
+        [a-z]{1,3}
+      | [\d.]+
+      | [\d.]+(?:\-|\.\.)[\d.]+
+      | [a-z]{1,3}(?:\-|\.\.)[a-z]{1,3}
+      | [\d.]+(?::[\d.]+){1,2}
+      )$/xi
+   ) {
+    $action = "number";
+}
+
+call_action( $action => @ARGV );
+
+
+sub action {
+    my $name = shift;
+    $name = [ $name ] unless ref($name);
+    unshift @_, "-action" if 1 == @_;
+    my %a = @_;
+    $a{-name} //= $$name[0];
+
+    $ACTIONS{$_} = \%a for @$name;
+}
+
+sub call_action {
+    my $name = shift || "";
+    usage("No such action $name") unless exists $ACTIONS{$name};
+    my $action = $ACTIONS{$name};
+
+    my @arg = @_;
+    @arg = $$action{-build_args}->( $action, @_ ) if $$action{-build_args};
+
+    $$action{-action}->( $action, @arg );
+}
+
+sub get_options {
+    my $OPT = shift;
+    GetOptions $OPT, @_ or usage(1);
+    usage() if $$OPT{help} || $$OPT{version} || !@ARGV;
+    lock_keys(%$OPT, keys %$OPT, map /^(\w+)/, @_);
+}
+
+sub usage {
+    my $status = (@_ && $_[0] =~ /^\d+$/) ? shift(@_) : 0+@_;
+    print @_, "\n" if @_;
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    $OPT{$_} = $OPT{$_} ? "enabled" : "disabled" for map /^(\w+).*!/, @OPT_SPEC;
+    print $OPT{version} ? "$exe version $VERSION\n" : USAGE($exe);
+    exit $status;
+}
