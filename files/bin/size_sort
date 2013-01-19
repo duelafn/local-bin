@@ -1,0 +1,15 @@
+#!/usr/bin/perl
+use 5.006;
+use strict;
+use warnings;
+use Dean::Util qw/size2bytes/;
+our $VERSION = '0.0000';# Created: 2005-01-26
+
+my $col;
+$col = shift if @ARGV;
+
+if ($col) {
+  print map $$_[1], sort { $$a[0] <=> $$b[0] } map { my $x = (split)[$col-1]; $x ? [size2bytes($x),$_] : [0,$_] } <STDIN>;
+} else {
+  print map $$_[1], sort { $$a[0] <=> $$b[0] } map { /^\s*([\w\.]+)/ ? [size2bytes($1),$_] : [0,$_] } <STDIN>;
+}

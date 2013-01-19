@@ -1,0 +1,90 @@
+#!/usr/bin/perl
+#
+# Author: Dean Serenevy
+# Email:  dean@cs.serenevy.net
+# URL:    http://dean.serenevy.net/
+#
+# This software is hereby placed into the public domain. If you use this
+# code, a simple comment giving credit or an email letting me know that you
+# find it useful would be courteous but is not required.
+#
+# The software is provided "as is" without warranty of any kind, either
+# expressed or implied including, but not limited to, the implied warranties
+# of merchantability and fitness for a particular purpose. In no event shall
+# the authors or copyright holders be liable for any claim, damages or other
+# liability, whether in an action of contract, tort or otherwise, arising
+# from, out of or in connection with the software or the use or other
+# dealings in the software.
+
+use Dean::Util qw/INCLUDE_POD SYSTEM QX qbash compile_latex cat tex2image/;
+use Getopt::Long;
+use File::Spec;
+our $VERSION = '3.0305';# Created: 2005-01-26
+$| = 1;
+
+my (%opt, $help, $tex, $ask_cleanup);
+GetOptions( "h|?|help"    => \$help,
+            "a|ask"       => \$ask_cleanup,
+            "x|X=s"       => \$opt{X},
+            "y|Y=s"       => \$opt{Y},
+            "color=s"     => \$opt{color},
+            "pagecolor=s" => \$opt{pagecolor},
+            "convert_args=s" => \$opt{convert_args},
+            "web"         => sub{ $opt{pagecolor}     = '#777777';
+                                  $opt{convert_args} .= ' -transparent #777777' },
+          );
+
+# Use defaults when not defined
+for (qw/convert_args color pagecolor X Y/)
+  { delete $opt{$_} unless defined $opt{$_} }
+
+if ($help or !@ARGV) {
+  my $cmd_name = (File::Spec->splitpath($0))[2];
+  print <<USAGE;
+usage: $cmd_name 'latex code' filename.type
+usage: $cmd_name filename.tex filename.type
+
+  The following options are accepted, defaults in [ ]:
+    -X              x-resolution [144]
+    -Y              y-resolution [144]
+    --color         text color as LaTeX color name, grey percentage, "r,g,b",
+                    or "c,m,y,k" all numbers are less than 1. [black]
+    --pagecolor     page color defined as with --color. [white]
+
+    --convert_args  arguments for the "convert" program [-transparent white]
+    -a | --ask      ask before cleaning up temporary files
+
+  If you specify options at the end of the command you may leave off the dashes
+  for example:
+
+     $cmd_name -X 300 -Y 300 '\$ f_1(x) := 3x^2-2y \$' f1.png
+     $cmd_name '\$ f_1(x) := 3x^2-2y \$' f1.png X 300 Y 300
+
+  WARNING: If using the second style, then you must provide latex code or -.
+
+  If the 'latex code' is missing or is a single dash '-' then the program will
+  allow you to enter multi-line input (which may include the LaTeX headers if
+  you need to use some LaTeX packages). After entering your code press return
+  and then ^D (control - d).
+  Example:
+
+  [dean\@styx]\$ $cmd_name - big_picture.png
+  \\documentclass{article}
+  \\usepackage{pstricks}
+  \\pagestyle{empty}
+  \\begin{document}
+  ... lots of (probably pasted) tricky code ...
+  \\end{document}
+  ^D
+
+USAGE
+  exit;
+}
+
+if (@ARGV == 1 or ($tex=shift) eq '-') { local @ARGV = (); $tex = join '', <> }
+$tex = cat $tex if -f $tex;
+tex2image $tex, file => shift(), %opt, @ARGV;
+
+exit unless $ask_cleanup;
+print "Press <return> to cleanup files.";
+scalar <STDIN>;

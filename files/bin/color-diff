@@ -1,0 +1,11 @@
+#!/usr/bin/perl
+# VERSION = '0.0000';# Created: 2010-03-21
+use strict; use warnings;
+while (defined($_ = <STDIN>)) {
+  s/\n/\e[0m\n/;             # stop coloring before each line ending
+  s/^\+/\e[92m+/;            # Added lines in green
+  s/^\-/\e[91m-/;            # removed lines in red
+  s/^\@/\e[96m\@/;           # Breaks in the diff in cyan
+  s/^([=A-Za-z])/\e[93m$1/;  # diff headers / file names in yellow
+  print
+}

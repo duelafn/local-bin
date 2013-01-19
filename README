@@ -1,0 +1,33 @@
+
+LOCAL-BIN
+=========
+
+Various scripts and utilities that I've written.
+
+Released under the CC-BY License.
+
+
+
+DEPENDENCIES
+============
+
+Dean::Util  (http://dean.serenevy.net/code/projects/Dean::Util)
+Path::Class
+
+
+
+Debian/Ubuntu Packages
+----------------------
+
+The following steps will install debian/Ubuntu packages used by these
+scripts and Dean::Util.
+
+  # Add my Debian Repository to 
+  echo "deb http://serenevy.net/debian perl/" | sudo tee /etc/apt/sources.list.d/serenevy-perl.list
+
+  # Load my public-key (1024D/6B861770 2004-03-31  Dean Serenevy <dean@serenevy.net>) into apt:
+  sudo apt-key adv --keyserver pgp.mit.edu --recv-keys 0x1dcfaa536b861770
+
+  # Install dependencies (and some packages suggested by Dean::Util)
+  sudo apt-get update
+  sudo apt-get install libdate-manip-perl libdatetime-perl libdean-util-perl libfile-chdir-perl libpath-class-perl libperlio-gzip-perl libterm-readkey-perl libwww-perl libxml-libxml-perl libyaml-perl

@@ -1,0 +1,5 @@
+#!/bin/sh
+for w in $@; do
+  echo "# $w"
+  perl -e '$x=pop;print grep"@{[sort$x=~/./g]}"eq"@{[sort/./g]}",<>' /usr/share/dict/words "$w"
+done

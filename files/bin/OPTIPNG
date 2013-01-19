@@ -1,0 +1,64 @@
+#!/usr/bin/perl
+use strict; use warnings; use 5.010;
+
+our %opt;
+use Getopt::Long qw/:config bundling/;
+BEGIN {
+  our $VERSION = '0.0223';# Created: 2010-01-19
+  GetOptions \%opt,
+    qw/help|h version noact|no-act|dry-run DEBUG
+       fix level|o=i dir recursive|r
+      / or ($opt{help} = 1);
+  if (($opt{help} || $opt{version}) and !$^C) {
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    print $opt{version} ? "$exe version $VERSION\n" : <<"USAGE"; exit; }
+usage: ${exe} file(s)
+
+If no files provided, selects all png images in current directory
+
+OPTIONS
+
+ -r                  recursive
+
+ --fix               Enable error recovery
+ -o <level>          optimization level (0-7; default probably 2)
+ --dir <path>        Write output file(s) to directory
+USAGE
+}
+
+use Dean::Util qw/ pmap SYSTEM bytes2size nicef find /;
+
+my @OPTIPNG_OPTS;
+push @OPTIPNG_OPTS, "-simulate"       if $opt{noact};
+push @OPTIPNG_OPTS, "-fix"            if $opt{fix};
+push @OPTIPNG_OPTS, "-dir", $opt{dir} if $opt{dir};
+push @OPTIPNG_OPTS, "-o", $opt{level} if $opt{level};
+
+my ($orig, $new);
+@ARGV = $opt{recursive} ? '.' : glob("*.png") unless @ARGV;
+@ARGV = map {
+  (-d $_) ? find([$_], qw/-type f -name *.png/) : $_
+} @ARGV if $opt{recursive};
+for (pmap { [ optipng($_) ] } @ARGV) {
+  next unless $$_[0];
+  $orig += $$_[0];
+  $new  += $$_[1];
+}
+
+exit unless $orig and $new;
+say "BEFORE: ", bytes2size($orig),
+  "  AFTER: ", bytes2size($new),
+  "  SAVED: ", bytes2size($orig-$new),
+  " (",nicef(100*($orig-$new)/$orig),"%)"
+;
+
+
+sub optipng {
+  my $file = shift;
+  return unless -w $file;
+  my $pre_size = -s $file;
+  my $res = SYSTEM optipng => @OPTIPNG_OPTS, '--', $file, \">/dev/null 2>&1";
+  warn "Error optimizing '$file'\n" unless 0 == $res;
+  my $post_size = -s $file;
+  return wantarray ? ($pre_size, $post_size) : $pre_size - $post_size;
+}

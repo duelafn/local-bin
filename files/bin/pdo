@@ -1,0 +1,137 @@
+#!/usr/bin/perl
+use strict; use warnings;
+
+our %opt;
+use Getopt::Long qw/:config posix_default bundling pass_through /;
+BEGIN {
+  our $VERSION = '1.0302';# Created: 2010-07-01
+  %opt = ( formats => 1 );
+  GetOptions \%opt, qw/help|h version verbose|v DEBUG formats! jobs|j=i noact|no-act|dry-run / or ($opt{help} = 1);
+  $opt{verbose} = 1 if $opt{DEBUG};
+  if (($opt{help} || $opt{version}) and !$^C) {
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    print $opt{version} ? "$exe version $VERSION\n" : <<"USAGE"; exit; }
+usage: ${exe} [OPTIONS] command [command_options] [arguments]
+       ${exe} [OPTIONS] command [command_options] -- [arguments]
+
+EXAMPLES
+
+ pdo lzma *.tar
+ pdo lzma -d *.tar.lzma
+ pdo frobnicator frobnicate -- *.txt
+ pdo convert _ %b.png -- *.gif
+
+
+DESCRIPTION
+
+Execute commands in parallel. Normally, "command options" are any tokens
+which begin with "-" and the "arguments" list begins with the first token
+which does not begin with "-". However, the "_" and "--" tokens are treated
+specially.
+
+If the "--" token appears then all preceeding tokens will be trated as
+command options even if they do not look like options. All tokens following
+the "--" will be treated as arguments (even if they look like options).
+
+If "_" appears as a command option then then it will be replaced with the
+argument (just like the "%a" format). "_" must comprise the entire token
+(that is, "foo_bar" is left alone while "foo%abar" will be expanded). If
+neither "_", nor any formats appear as a command option token, a single
+arguemnt will be appended to each invocation of the command. Multiple
+occurrences of "_" will consume multiple arguments on each command
+invocation.
+
+Furthermore, unless the "--no-formats" OPTION appears, format expansion is
+performed on the command options (but not arguments):
+
+  %%     literal %
+  %a     the argument
+  %f     file name (directories removed)
+  %B     basename (all extensions removed)
+  %b     basename (last extension removed)
+  %d     diretory ('.' if %a has no path components)
+  %E     extensions removed by %B
+  %e     extension removed by %b
+  %i     index / item number (%02i and similar permitted)
+
+  At the moment, all formats are in terms of the first argument in the case
+  where multiple "_" tokens appear in the command options.
+
+
+OPTIONS
+
+ --no-act | --dry-run   Do not execute commands, simply print command lines
+ --jobs | -j <n>        Execute n jobs at a time (default: one per cpu)
+ --no-formats           Disable format expansion
+ --verbose | -v         Print command before executing
+
+USAGE
+}
+
+use Dean::Util 1.052 qw/ pmap partition qbash first_pos ceil /;
+use Path::Class;
+$_Util::pmap::threads = $opt{jobs} if $opt{jobs};
+
+my $COMMAND = shift;
+
+my $dash_dash = first_pos { $_ eq "--" } @ARGV;
+my (@opts, @files);
+
+# split options from arguments
+#-----------------------------
+if (defined $dash_dash) {
+  @opts  = @ARGV[0..$dash_dash-1];
+  @files = @ARGV[$dash_dash+1..$#ARGV];
+}
+
+else {
+  while ($ARGV[0] =~ /^(?:-|_$)/) {
+    push @opts, shift @ARGV;
+  }
+  push @files, @ARGV;
+}
+
+my @underscore = grep { $opts[$_] eq "_" } 0..$#opts;
+my $N = @underscore ? @files / @underscore : 0+@files;
+die "Number of arguments is not a multiple of the number of underscores!"
+  unless !@underscore or $N == ceil(@files / @underscore);
+
+
+# do in parallel
+#---------------
+pmap {
+  my $k = $_ * (@underscore || 1);
+  my $arg = $files[$k];
+  my @c = @opts;
+
+  my $formats = 0;
+  if ($opt{formats}) {
+    my $file = file($arg);
+    my $B = $file->basename; my $E = ""; $E = $1 if $B =~ s/\.(.+)$//;
+    my $b = $file->basename; my $e = ""; $e = $1 if $b =~ s/\.([^.\n]+)$//;
+    my %exp =
+      ( "%" => "%",
+        a => $arg,
+        f => $file->basename,
+        B => $B, b => $b,
+        d => $file->parent,
+        E => $E, e => $e,
+        i => 1 + $_,
+      );
+    $formats += s/\%([%afBbdEei])/$exp{$1}/g for @c;
+    $formats += s/\%(\d+)(i)/sprintf "%$1d", $exp{$2}/ge for @c;
+  }
+
+  if (@underscore) {
+    my $i = 0;
+    splice @c, $_, 1, $files[$k + $i++] for @underscore;
+  } else {
+    push @c, $arg unless $formats;
+  }
+
+  print join(" ", map qbash($_), $COMMAND => @c), $/
+    if $opt{noact} or $opt{verbose};
+
+  return if $opt{noact};
+  system $COMMAND => @c;
+} 0..$N-1;

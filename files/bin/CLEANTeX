@@ -1,0 +1,66 @@
+#!/usr/bin/perl
+use strict; use warnings;
+
+our %opt;
+use vars qw/$DEBUG $no_act/;
+use Getopt::Long qw/:config bundling/;
+BEGIN {
+  our $VERSION = '5.0005';# Created: 2005-01-26
+  my ($B,$N) = ("\e[1m","\e[0m");
+  %opt = ( DEBUG => \$DEBUG, 'dry-run' => \$no_act, 'no-act' => \$no_act, interactive => \($opt{i}) );
+  GetOptions \%opt, qw/help|h v version dry-run no-act DEBUG i interactive p r/ or ($opt{help} = 1);
+  if (($opt{help}) and !$^C) {
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2]; print <<"USAGE"; exit; }
+usage: ${exe} [options]
+
+OPTIONS
+
+ -p                  preserve ps and pdf files
+ -r                  recursive
+ -i, --interactive   ask before removing files
+
+ --no-act,
+ --dry-run           don't delete files, just show which ones would be deleted
+
+USAGE
+  if (($opt{v} or $opt{version}) and !$^C) {
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2]; print "$exe version $VERSION\n"; exit; }
+}
+
+use Dean::Util qw/format_cols natural_sort Tf find/;
+my @DIRS = @ARGV ? @ARGV : ('.');
+@ARGV = ();
+
+my @ext = qw/ tex~ aux dvi log bbl blg idx ilg ind toc out lab six nav snm /;
+my @support = qw/ texput.lgpl /;
+push @ext, qw|ps pdf| unless $opt{p};
+my @texfiles;
+
+if ($opt{r}) { @texfiles = find \@DIRS, -name => "*.tex" }
+else         { @texfiles = map glob("$_/*.tex"), @DIRS   }
+
+$DEBUG && printf "Found %d texfiles\n", 0+@texfiles;
+exit unless @texfiles;
+
+my @goners;
+for my $f (@texfiles) {
+  $f =~ s/\.tex$//;
+  for (@ext) {
+    push @goners, "$f.$_" if -e "$f.$_";
+  }
+}
+for (@support) {
+  push @goners, $_ if -e $_;
+}
+
+exit unless @goners;
+@goners = natural_sort @goners;
+$no_act || $DEBUG and printf "Found %d files to delete\n", 0+@goners;
+print format_cols \@goners if $DEBUG or $no_act or $opt{i};
+
+if ($opt{i}) {
+  print "Delete these files? [Y/n] ";
+  exit unless Tf;
+} elsif ($no_act) { exit }
+
+unlink @goners;

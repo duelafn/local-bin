@@ -1,0 +1,10 @@
+#!/usr/bin/perl
+use 5.006;
+use strict;
+use warnings;
+
+use Dean::Util qw/SYSTEM/;
+$ENV{PATH} = "$ENV{PATH}:/Local/bin";
+
+@ARGV = <> unless @ARGV;
+SYSTEM 'du', '-xsh', @ARGV, \"|", "size_sort";

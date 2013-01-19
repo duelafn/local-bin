@@ -1,0 +1,136 @@
+#!/usr/bin/perl
+use strict; use warnings;
+
+our %opt;
+use Getopt::Long qw/:config bundling/;
+BEGIN {
+  our $VERSION = '5.0309';# Created: 2005-07-24
+  GetOptions \%opt, qw/help|h version noact|no-act|dry-run DEBUG
+                       absolute|a interactive|i mkdir|c verbose|v dir_dest|dir-dest|d force|f
+                      / or ($opt{help} = 1);
+  $opt{force} = !$opt{interactive} if defined $opt{interactive};
+
+  if (($opt{help} || $opt{version}) and !$^C) {
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    print $opt{version} ? "$exe version $VERSION\n" : <<"USAGE"; exit; }
+usage: ${exe} [options] \e[1msource(s)\e[0m \e[1mdestination\e[0m
+
+Move sources to destination and then create a symbolic link from each
+source to its new destination. Sources may be files or directories. If more
+than one source is provided, then the destination must be a directory (or
+not exist if the --mkdir option is provided). For the purposes of the
+--mkdir option, the destination is considered to be a file name if there is
+only one source and a directory if there is more than one source. This can
+be overridden by using the --dir-dest option.
+
+OPTIONS:
+  -a, --absolute     make absolute symbolic links (default is relative)
+  -c, --mkdir        ensure that path to destination exists, creating if necessary
+  -d, --dir-dest     insist that the destination is a directory
+  -i, --interactive  interactive mode; ask before overwriting files
+  -f, --force        forcibly delete things without asking if necessary
+  -v, --verbose      explain what is being done
+
+USAGE
+}
+
+use File::Copy;
+use Path::Class;
+use File::Copy::Recursive qw/ dirmove /;
+use Cwd qw/ realpath /;
+
+
+my $dest = pop;
+my  @src = @ARGV;
+$dest = check_dest(@src, $dest);
+
+mvlns( $_, $dest ) for @src;
+
+
+sub mvlns {
+  my ($src, $target) = @_;
+  $src =~ s#/+$##;
+
+  if (-l $src) {
+    die "Source '$src' is a symbolic link\n";
+  }
+
+  if ($target->is_dir) {
+    return mvlns( $src, $target->file( file($src)->basename ) );
+  }
+
+  die "Directpry @{[ $target->parent ]} does not exist\n" unless -d $target->parent;
+  die "Target $target exists\n"                           if -e $target;
+  die "Source $src does not exist\n"                      unless -e $src;
+
+  do_move( $src, $target );
+  lns( $target, $src );
+}
+
+sub lns {
+  my ($old, $new) = @_;
+
+  if ($opt{absolute} or is_root(common_parent($old, $new))) {
+    die "Can't create symlink $new: $!" unless symlink $old->absolute, $new;
+  } else {
+    die "Can't create symlink $new: $!" unless symlink file(realpath($old))->relative(file(realpath($new))->parent), $new;
+  }
+}
+
+sub common_parent {
+  my ($a, $b) = map dir($_)->absolute, @_;
+  my $p = $a->parent;
+  $p = $p->parent while !$p->subsumes( $b );
+  return $p;
+}
+
+sub do_move {
+  my ($old, $new) = @_;
+  die "Refuse to operate on root directory" if is_root($old) or is_root($new);
+
+  if (-d $old) {
+    die if -e $new;
+    die "Error moving $old -> $new: $!" unless rename($old, $new) || dirmove($old, $new);
+  } else {
+    die "Error moving $old -> $new: $!" unless move $old, $new;
+  }
+}
+
+sub is_root {
+  my $dir = shift;
+  return realpath($dir) eq '/';
+}
+
+sub check_dest {
+  my $dest = pop;
+  $dest =~ s#/+$##;
+
+  die "Empty destinations confuse me. Goodbye.\n" unless @_ and defined $dest and $dest =~ /./;
+
+  if (-e $dest) {
+    die "Destination $dest exists and is not a directory\n" unless -d _;
+    return dir($dest);
+  }
+
+  if (@_ > 1 or $opt{dir_dest}) {
+    $dest = dir($dest);
+    ensure_dir($dest);
+    return $dest;
+  }
+
+  else {
+    $dest = file($dest);
+    ensure_dir($dest->parent);
+    return $dest;
+  }
+}
+
+sub ensure_dir {
+  my $dir = shift;
+  return if -d $dir;
+  if ($opt{mkdir}) {
+    die "Unable to create directory $dir: $!\n" unless $dir->mkpath;
+  } else {
+    die "Directory $dir does not exist\n";
+  }
+}

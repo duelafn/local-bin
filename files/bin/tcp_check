@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+use strict; use warnings;
+
+our (%opt, $host, $port);
+use Getopt::Long qw/:config bundling/;
+BEGIN {
+  our $VERSION = '1.0002';# Created: 2010-11-11
+  my ($B,$N) = ("\e[1m","\e[0m");
+  %opt = ( timeout => 30 );
+  GetOptions \%opt, qw/help|h version noact|no-act|dry-run DEBUG timeout|t=i/ or ($opt{help} = 1);
+  ($host, $port) = @ARGV;
+  if (($opt{help} || $opt{version} || !$host || !$port || $port !~ /^\d+$/) and !$^C) {
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    print $opt{version} ? "$exe version $VERSION\n" : <<"USAGE"; exit; }
+usage: ${exe} [options] <host> <port>
+
+Determine whether a TCP port is accepting connections
+
+OPTIONS
+
+ -t, --timeout <sec>   timeout after given seconds (DEFAULT: $opt{timeout})
+USAGE
+}
+
+use IO::Socket;
+
+my $sock = IO::Socket::INET->new( PeerAddr => $host, PeerPort => $port, Proto => 'tcp', Timeout => $opt{timeout} );
+print "$host:$port is ";
+if ($sock) {
+  close $sock;
+  print "accepting connections\n";
+} else {
+  if (my $msg = $@) {
+    $msg =~ s/^IO::Socket::INET: //;
+    $msg =~ s/^connect: //;
+    print "not accepting connections: $msg\n";
+  } else {
+    print "not accepting connections: unknown reason\n";
+  }
+}
