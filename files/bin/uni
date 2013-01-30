@@ -3,27 +3,44 @@ use strict; use warnings; use autodie; use 5.010;
 
 use Getopt::Long qw/:config bundling/;
 use Hash::Util qw/ lock_keys /;
-our $VERSION = '1.0013';# Created: 2011-12-24
+our $VERSION = '1.0106';# Created: 2011-12-24
 
 our %OPT = (  );
-our @OPT_SPEC = qw/ help|h version noact|no-act|dry-run path=s@ e DEBUG /;
+our @OPT_SPEC = qw/ help|h version path=s@ e class /;
 sub USAGE { <<"USAGE" };
 usage: $_[0] [options] PATTERN
+       $_[0] --class NAME
 
 Search through unicode symbols for pattern. Eg:
 
 \$ uni heart
-0x2619 ☙ REVERSED ROTATED FLORAL HEART BULLET
-0x2661 ♡ WHITE HEART SUIT
-0x2665 ♥ BLACK HEART SUIT
-0x2763 ❣ HEAVY HEART EXCLAMATION MARK ORNAMENT
+0x2619  ☙  \\p{So}  REVERSED ROTATED FLORAL HEART BULLET
+0x2661  ♡  \\p{So}  WHITE HEART SUIT
+0x2665  ♥  \\p{So}  BLACK HEART SUIT
+0x2763  ❣  \\p{So}  HEAVY HEART EXCLAMATION MARK ORNAMENT
 ...
+
+\$ uni --class Po
+0x0021  !  \\p{Po}  EXCLAMATION MARK
+0x0022  "  \\p{Po}  QUOTATION MARK
+0x0023  #  \\p{Po}  NUMBER SIGN
+0x0025  %  \\p{Po}  PERCENT SIGN
+...
+
+
+OPTIONS
+
+ -e                  treat pattern as a regular expression
+ --path <dir>        path to examine for UnicodeData.txt
 USAGE
 
 use Encode;
+use Unicode::UCD qw/ charinfo /;
+use Encode;
+use open ':encoding(UTF-8)', ':std';
+@ARGV = map decode("UTF-8", $_), @ARGV;
 
 get_options( \%OPT, @OPT_SPEC );
-binmode STDOUT, ':encoding(UTF-8)';
 
 my $DATA;
 for (@{$OPT{path} || []}, "/usr/share/unicode", @INC) {
@@ -39,25 +56,33 @@ for (@{$OPT{path} || []}, "/usr/share/unicode", @INC) {
 }
 die "Unable to locate unicore/UnicodeData.txt (do you need to install the unicode-data package?)" unless $DATA;
 
-my $pat = decode("UTF-8", join " ", @ARGV);
+my $pat = join " ", @ARGV;
 
-if (length $pat == 1 and ord($pat) >= 128) {
-    require charnames;
-    printf "0x%04X %s %s$/", ord $pat, $pat, charnames::viacode(ord $pat) || "Private Use";
+if (length $pat == 1) {
+    show_char(ord $pat);
     exit;
 }
 
 
-if ($OPT{e}) { $pat = qr/$pat/i }
-else         { $pat = qr/\Q$pat\E/i }
+if ($OPT{e})     { $pat = qr/$pat/i }
+if ($OPT{class}) { $pat = qr/;\Q$pat\E;/ }
+else             { $pat = qr/\Q$pat\E/i }
 
 while (my $line = <$DATA>) {
     next unless $line =~ $pat;
     my @F = split /;/, $line;
-    say join " ", "0x$F[0]", chr(hex $F[0]), $F[1];
+    show_char("0x$F[0]");
 }
 
 
+sub show_char {
+    my $info = charinfo(shift);
+    return unless $$info{code};
+    $$info{chr} = chr(hex($$info{code}));
+    $$info{name} //= "Private Use";
+    $$info{unicode10} = $$info{unicode10} ? "  Unicode 1.0 name: $$info{unicode10}" : "";
+    say "0x$$info{code}  $$info{chr}  \\p{$$info{category}}  $$info{name}$$info{unicode10}";
+}
 
 sub get_options {
   my $OPT = shift;
