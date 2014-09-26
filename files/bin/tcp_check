@@ -4,10 +4,10 @@ use strict; use warnings;
 our (%opt, $host, $port);
 use Getopt::Long qw/:config bundling/;
 BEGIN {
-  our $VERSION = '1.0002';# Created: 2010-11-11
+  our $VERSION = '1.2.0';
   my ($B,$N) = ("\e[1m","\e[0m");
   %opt = ( timeout => 30 );
-  GetOptions \%opt, qw/help|h version noact|no-act|dry-run DEBUG timeout|t=i/ or ($opt{help} = 1);
+  GetOptions \%opt, qw/help|h version noact|no-act|dry-run DEBUG timeout|t=i quiet|q/ or ($opt{help} = 1);
   ($host, $port) = @ARGV;
   if (($opt{help} || $opt{version} || !$host || !$port || $port !~ /^\d+$/) and !$^C) {
     require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
@@ -19,22 +19,32 @@ Determine whether a TCP port is accepting connections
 OPTIONS
 
  -t, --timeout <sec>   timeout after given seconds (DEFAULT: $opt{timeout})
+ -q, --quiet           do not print anything
+
+EXIT STATUS
+
+  0  host is accepting connections
+  1  host is not accepting connections
+  2  unknown error
 USAGE
 }
 
 use IO::Socket;
 
 my $sock = IO::Socket::INET->new( PeerAddr => $host, PeerPort => $port, Proto => 'tcp', Timeout => $opt{timeout} );
-print "$host:$port is ";
+print "$host:$port is " unless $opt{quiet};
 if ($sock) {
   close $sock;
-  print "accepting connections\n";
+  print "accepting connections\n" unless $opt{quiet};
+  exit 0;
 } else {
   if (my $msg = $@) {
     $msg =~ s/^IO::Socket::INET: //;
     $msg =~ s/^connect: //;
-    print "not accepting connections: $msg\n";
+    print "not accepting connections: $msg\n" unless $opt{quiet};
+    exit 1;
   } else {
-    print "not accepting connections: unknown reason\n";
+    print "not accepting connections: unknown reason\n" unless $opt{quiet};
+    exit 2;
   }
 }
