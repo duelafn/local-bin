@@ -31,7 +31,7 @@ use Dean::Util qw/format_cols natural_sort Tf find/;
 my @DIRS = @ARGV ? @ARGV : ('.');
 @ARGV = ();
 
-my @ext = qw/ tex~ aux dvi log bbl blg idx ilg ind toc out lab six nav snm /;
+my @ext = qw/ tex~ aux dvi log bbl blg idx ilg ind toc out lab six nav snm synctex.gz /;
 my @support = qw/ texput.lgpl /;
 push @ext, qw|ps pdf| unless $opt{p};
 my @texfiles;
