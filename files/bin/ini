@@ -1,0 +1,198 @@
+#!/usr/bin/perl -w
+# Copyright (C) 2016  Dean Serenevy
+#
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+# more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+use strict; use warnings; use 5.014;
+
+use Getopt::Long qw/:config bundling/;
+use Hash::Util qw/ lock_keys /;
+our $VERSION = '1.0.0';# Created: 2016-03-16
+
+our %OPT = (  );
+our @OPT_SPEC =
+qw/ help|h version noact|no-act|dry-run DEBUG
+    trailing_comments|trailing-comments!
+  /;
+sub USAGE { <<"__USAGE__" };
+usage: $_[0] [options] ACTION ARG(S)
+
+Modify INI files while (mostly) preserving comments.
+
+
+ACTIONS
+
+  $_[0] set  FILE SECTION KEY VALUE
+  $_[0] set  FILE SECTION1 KEY=VALUE KEY=VALUE ... SECTION2 KEY=VALUE ...
+
+    Set one or more values. If more than one value is to be set then you
+    must use KEY=VALUE pairs on the command line. Multiple sections may be
+    modified as long as the sections do not contain an equal sign.
+
+  $_[0] get  FILE SECTION KEY [DEFAULT]
+
+    Print the current value with a default fall-back value if desired. If
+    the key does not exist and no default is given, nothing is printed.
+
+  $_[0] del  FILE SECTION KEY
+
+    Delete the named key.
+
+  $_[0] test FILE SECTION KEY [VALUE]
+
+    Test that the named key is equal to the specified value. If no value is
+    passed, then merely test that the key is set. The script exits
+    successfully if and only if the test succeeds.
+
+  $_[0] incr FILE SECTION KEY [STEP]
+  $_[0] decr FILE SECTION KEY [STEP]
+
+    Increment a numeric entry by the given step size (default=1). If the
+    key does not exist it will be initialized to zero before being changed.
+
+
+OPTIONS
+
+ --trailing-comments   When set, trailing comments will be parsed
+                         (else will be part of value)
+
+
+TODO / WISHLIST
+
+ * Sectionless keys
+ * Smartly uncommenting values or sections when possible
+ * `comment` action which non-destructively "deletes"
+ * Don't delete too much when deleting entries below commented entries
+ * Array values
+__USAGE__
+
+use Config::IniFiles;
+
+our %ACTIONS; sub action;
+action help => sub { usage() };
+
+
+action set => sub {
+    my ($action, $file, $section, @args) = @_;
+    my $ini = ini($file);
+
+    @args = "$args[0]=$args[1]" if 2 == @args and $args[0] !~ /=/;
+
+    for (@args) {
+        if (/=/) {
+            my ($key, $val) = split /=/, $_, 2;
+            set($ini, $section, $key, $val);
+        }
+
+        else {
+            $section = $_;
+        }
+    }
+
+    $ini->RewriteConfig;
+};
+
+action get => sub {
+    my ($action, $file, $section, $key, $dflt) = @_;
+    my $val = ini($file)->val($section, $key, $dflt);
+    say $val if defined $val;
+};
+
+action del => sub {
+    my ($action, $file, $section, $key) = @_;
+    my $ini = ini($file);
+    exit unless $ini->exists($section, $key);
+    $ini->delval($section, $key);
+    $ini->RewriteConfig;
+};
+
+action incr => sub {
+    my ($action, $file, $section, $key, $step) = @_;
+    my $ini = ini($file);
+    incr($ini, $section, $key, $step // 1);
+    $ini->RewriteConfig;
+};
+
+action decr => sub {
+    my ($action, $file, $section, $key, $step) = @_;
+    my $ini = ini($file);
+    incr($ini, $section, $key, -($step // 1));
+    $ini->RewriteConfig;
+};
+
+action test => sub {
+    my ($action, $file, $section, $key, $value) = @_;
+    my $ini = ini($file);
+    exit 1 unless $ini->exists($section, $key);
+    exit 1 if defined($value) and $value ne $ini->val($section, $key);
+    exit 0;
+};
+
+
+
+get_options( \%OPT, @OPT_SPEC );
+call_action( @ARGV );
+
+sub ini {
+    push @_, -handle_trailing_comment => 1 if $OPT{trailing_comments};
+    return (Config::IniFiles->new(-file => @_) or die "@Config::IniFiles::errors");
+}
+
+sub set {
+    my ($ini, $section, $key, $value) = @_;
+    $ini->setval($section, $key, $value) or $ini->newval($section, $key, $value);
+}
+
+sub incr {
+    my ($ini, $section, $key, $step) = @_;
+    my $val = $ini->val($section, $key, 0);
+    $val += ($step // 1);
+    set($ini, $section, $key, $val);
+}
+
+sub action {
+    my $name = shift;
+    $name = [ $name ] unless ref($name);
+    unshift @_, "-action" if 1 == @_;
+    my %a = @_;
+    $a{-name} //= $$name[0];
+
+    $ACTIONS{$_} = \%a for @$name;
+}
+
+sub call_action {
+    my $name = shift // "";
+    usage("No such action $name") unless exists $ACTIONS{$name};
+    my $action = $ACTIONS{$name};
+
+    my @arg = @_;
+    @arg = $$action{-build_args}->( $action, @_ ) if $$action{-build_args};
+
+    $$action{-action}->( $action, @arg );
+}
+
+
+sub get_options {
+    my $OPT = shift;
+    GetOptions $OPT, @_ or usage(1);
+    usage() if $$OPT{help} || $$OPT{version};
+    lock_keys(%$OPT, keys %$OPT, map /^(\w+)/, @_);
+}
+
+sub usage {
+    my $status = (@_ && $_[0] =~ /^\d+$/) ? shift(@_) : 0+@_;
+    print @_, "\n" if @_;
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    $OPT{$_} = $OPT{$_} ? "enabled" : "disabled" for map /^(\w+).*!/, @OPT_SPEC;
+    print $OPT{version} ? "$exe version $VERSION\n" : USAGE($exe);
+    exit $status;
+}
