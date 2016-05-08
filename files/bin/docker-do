@@ -16,7 +16,7 @@ use strict; use warnings; use 5.014;
 
 use Getopt::Long qw/:config bundling require_order/;
 use Hash::Util qw/ lock_keys /;
-our $VERSION = '0.5.1';# Created: 2016-05-08
+our $VERSION = '0.5.2';# Created: 2016-05-08
 
 our %OPT = (  );
 our @OPT_SPEC =
@@ -37,6 +37,10 @@ components may include "%" substitutions:
   %i  - image
   %c  - container id
 
+NOTE: Be careful with the 'SHELL COMMAND' syntax. The shell expansion
+happens on the host, not in the container (see examples).
+
+
 OPTIONS
 
  --interactive, -i   pass -i option to docker exec
@@ -47,21 +51,23 @@ OPTIONS
  --jobs, -j <N>      execute N jobs in parallel
 
  --no-act,
- --dry-run           don't change files, just list what would be done
+ --dry-run           don't run commands, just list what would be done
 
  --DEBUG             print additional information while running
  --help, -h          this usage message
  --version           show script version
 
+
 EXAMPLES
 
 Install a (debian) package in all containers:
 
-  docker-do -j4 apt-get install less
+  docker-do -j4  apt-get install less
 
-Backup all your postgres databases:
+Backup all your postgres databases (since shell expansion happens on host,
+you end up with multiple .sql files in the current directory on the host):
 
-  docker-do -j4 --image duelafn/postgresql "sudo -u postgres pg_dumpall > %n.sql"
+  docker-do -j4 --image duelafn/postgresql  "sudo -u postgres pg_dumpall > %n.sql"
 __USAGE__
 
 use Parallel::ForkManager;
