@@ -1,4 +1,7 @@
 #!/usr/bin/perl
+# Copyright (C) 2017  Dean Serenevy
+# This work is licensed under a Creative Commons Attribution 4.0 International License.
+#
 # VERSION = '0.0000';# Created: 2010-03-21
 use strict; use warnings;
 while (defined($_ = <STDIN>)) {
