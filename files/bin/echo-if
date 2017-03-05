@@ -1,0 +1,256 @@
+#!/usr/bin/perl -w
+# Copyright (C) 2017  UTG LLC
+#
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+# more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+use strict; use warnings; use 5.014;
+
+use Getopt::Long qw/:config bundling require_order pass_through/;
+use Hash::Util qw/ lock_keys /;
+our $VERSION = '1.0.0';# Created: 2017-03-04
+
+our %OPT = (
+    quiet => 0,
+);
+our @OPT_SPEC =
+qw/ help|h version
+    expand|e! after|a=s before|b=s
+    quiet|q+
+    code=s@ notcode=s@
+    ignore-i=s@ ignore_re|ignore-re=s@
+    match|m=s@ match_re|match-re=s@
+    report_status|report-status!
+  /;
+sub USAGE { <<"__USAGE__" };
+usage: $_[0] [options] MESSAGE COMMAND CMDARG(S)
+
+Runs the command and outputs the message depending on command results. This
+can be useful for cron jobs where you don't want to receive output unless
+somethung unexpected occurs.
+
+Standard input will be redirected to the command, so this program may be
+used as part of a pipe.
+
+WARNING:
+  The entirety of the command output will be buffered in memory under the
+  following situations:
+
+    * Use of --code or --notcode options (without --quiet)
+    * Use {{dt}}, {{seconds}}, or {{finish}} in --before with expanded templates
+
+OPTIONS
+
+ --expand, -e           Expand templates in the messages
+ --before, -b MESSAGE   Display message before command output
+ --after,  -a MESSAGE   Display message after  command output
+
+ --quiet, -q            Don't display command output, only display messages
+
+ --code EXITCODE        Only echo message if command exits with given code
+ --notcode EXITCODE     Only echo message if command does not exit with given code
+
+ --match PATTERN        Generate output if any lines match globby PATTERN
+ --match-re REGEXP      Generate output if any lines match REGEXP
+
+ --ignore PATTERN       Ignore lines of output matching globby PATTERN
+ --ignore-re REGEXP     Ignore lines of output matching REGEXP
+
+ --report-status        Report any non-zero exit status
+
+ --help, -h             this usage message
+ --version              show script version
+
+TEMPLATES
+
+The message supports a simple templating format: {{VAR}} and {{CMD ARG}}.
+Supported variables:
+
+  {{cwd}}               current working directory
+  {{dt}}                command run time (pretty-printed)
+  {{eol}}               output a newline
+  {{finish}}            date and time of command completion (pretty-printed)
+  {{nl}}                output a newline
+  {{seconds}}           command run time (in seconds)
+  {{start}}             date and time of start time (pretty-printed)
+  {{tab}}               output a TAB
+
+Supported commands:
+
+  {{start FORMAT}}      format command start time
+  {{finish FORMAT}}     format command completion time
+
+
+EXAMPLES
+
+Run git fsck looking for issues, only print the directory name if there is a problem:
+
+  find git/repositories -name HEAD -execdir echo-if -eb '{{pwd}}' git fsck --no-progress \;
+
+Run git status recursively, only print the directory name if there are changes:
+
+  find ~/ -name .git -execdir echo-if -eb '{{cwd}}' -a '' git status -s \;
+
+__USAGE__
+
+use Cwd;
+use Time::HiRes qw/ time /;
+use Time::Piece;
+use Dean::Util qw/ safe_pipe glob2regexp seconds2human  /;
+use IPC::Open3 qw/ open3 /;
+
+my $START = time;
+my %TEMPLATES = (
+    cwd      => sub { getcwd },
+    dt       => sub { join " ", grep defined($_), (split /\s+/, seconds2human(time - $START))[0..3] },
+    eol      => sub { $/ },
+    finish   => sub { localtime->strftime($_[1]//'%a, %e %b %Y %l:%M%P') },
+    nl       => sub { $/ },
+    seconds  => sub { time - $START },
+    start    => sub { localtime($START)->strftime($_[1]//'%a, %e %b %Y %l:%M%P') },
+    tab      => sub { "\t" },
+);
+
+get_options( \%OPT, @OPT_SPEC );
+MAIN(\%OPT, @ARGV);
+
+sub MAIN {
+    my ($opt, @command) = @_;
+    my ($FH, $wanted, $print_now, $match, $ignore, @rv);
+
+    # Execute
+    my $pid = open3("<&STDIN", $FH, undef, @command);
+
+    my ($delay_print, $test_lines);
+    $delay_print = 1 if $$opt{expand} and ($$opt{before}//'') =~ /\{\{(?:dt|seconds|finish)\b/;
+    $delay_print = 1 if $$opt{code} or $$opt{notcode};
+    $test_lines  = 1 unless $$opt{code} or $$opt{notcode};
+
+    # Process in real-time if we are able to:
+    while (defined(my $line = <$FH>)) {
+        if ($print_now) {
+            output($line);
+            next;
+        }
+
+        if ($test_lines and !$wanted) {
+            $match  //= build_patterns($$opt{match},  $$opt{match_re});
+            $ignore //= build_patterns($$opt{ignore}, $$opt{ignore_re});
+
+            if ($line =~ /\S/ and any($line, $match, 1) and !any($line, $ignore, 0)) {
+                $wanted = 1;
+                $print_now = 1 if $$opt{quiet};# Don't try to buffer the rest
+                unless ($delay_print) {
+                    $print_now = 1;
+                    display($$opt{before}, $opt);
+                    output(@rv, $line);
+                    @rv = ();# printed, don't save them
+                }
+            }
+        }
+
+        # @rv collected for delayed case as well as for not yet determined case.
+        if ($delay_print or !$wanted) {
+            push @rv, $line if $test_lines or !$$opt{quiet};
+        }
+    }
+
+    # Done executing,
+    waitpid($pid, 0);
+    my $stat = $? >> 8;
+
+    # Now test the fully-buffered cases
+    if ($$opt{code}) {
+        $wanted = grep { $stat == $_ } @{$$opt{code}};
+    } elsif ($$opt{notcode}) {
+        $wanted = !grep { $stat == $_ } @{$$opt{notcode}};
+    }
+
+    exit $stat unless $wanted or ($stat and $$opt{report_status});
+
+    # Output was delayed, write the message and command output
+    if ($delay_print) {
+        display($$opt{before}, $opt);
+        output(@rv);
+    }
+
+    # Some useful info:
+    if ($$opt{report_status}) {
+        if    ($? == -1) { say "failed to execute: $!" }
+        elsif ($? & 127) { printf("child died with signal %d, %s coredump\n", ($? & 127),  (($? & 128) ? 'with' : 'without')) }
+        elsif ($stat)    { say "child exited with value $stat" }
+    }
+
+    # Finally, the after message
+    display($$opt{after}, $opt);
+
+    exit $stat;
+}
+
+
+sub any {
+    my ($line, $pats, $dflt) = @_;
+    return $dflt unless $pats and @$pats;
+    for (@$pats) {
+        return 1 if $line =~ $_;
+    }
+    return 0;
+}
+
+sub build_patterns {
+    my ($globs, $regexps) = @_;
+    my @pats;
+    push @pats, @$regexps if $regexps;
+    push @pats, map glob2regexp($_), @$globs if $globs;
+    @pats = map qr/$_/, @pats;
+    return \@pats;
+}
+
+sub output {
+    return if $OPT{quiet};
+    print @_;
+    print $/ if @_ and $_[-1] !~ /\R$/;
+}
+
+sub display {
+    my ($msg, $opt) = @_;
+    return unless defined($msg);
+    $msg = fill_in($msg) if $$opt{expand};
+    say $msg;
+}
+
+sub fill_in {
+    state $TMPL = join "|", keys %TEMPLATES;
+    return( $_[0] =~ s/\{\{($TMPL)((?:\s+.*?)?)\}\}/replace($1, $2)/ger );
+}
+
+sub replace {
+    my ($tmpl, $arg) = @_;
+    $arg = undef unless length($arg);
+    $arg =~ s/^\s+// if defined($arg);
+    return $TEMPLATES{$tmpl}->($tmpl, $arg);
+}
+
+sub get_options {
+    my $OPT = shift;
+    GetOptions $OPT, @_ or usage(1);
+    usage() if $$OPT{help} || $$OPT{version};
+    lock_keys(%$OPT, keys %$OPT, map /^(\w+)/, @_);
+}
+
+sub usage {
+    my $status = (@_ && $_[0] =~ /^\d+$/) ? shift(@_) : 0+@_;
+    print @_, "\n" if @_;
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    $OPT{$_} = $OPT{$_} ? "enabled" : "disabled" for map /^(\w+).*!/, @OPT_SPEC;
+    print $OPT{version} ? "$exe version $VERSION\n" : USAGE($exe);
+    exit $status;
+}
