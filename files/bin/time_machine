@@ -6,7 +6,7 @@ use strict; use warnings; use 5.010;
 our %opt;
 use Getopt::Long qw/:config bundling/;
 BEGIN {
-  our $VERSION = '4.0.0';# Created: 2008-11-07
+  our $VERSION = '4.0.1';# Created: 2008-11-07
   my ($B,$N) = ("\e[1m","\e[0m");
   %opt = ( qw/
               keep-dirlinks 1  prune-hidden 0  prune-rcs 0  prune-backup 1
@@ -215,6 +215,7 @@ sub timespec_format {
     return "%Y-%m-%d"          if /^d/;
     return "%Y-%m"             if /^m/;
     return "%Y"                if /^y/;
+    return "w%G-%V"            if /^w/;
     die "Unknown time spec '$_'";
 }
 
