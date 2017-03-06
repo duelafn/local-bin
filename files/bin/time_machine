@@ -209,13 +209,13 @@ sub parse_keeps {
 
 sub timespec_format {
     local $_ = shift;
-    return "%Y-%m-%d %H:%M:%S" if /^sec/;
-    return "%Y-%m-%d %H:%M"    if /^min/;
-    return "%Y-%m-%d %H"       if /^h/;
-    return "%Y-%m-%d"          if /^d/;
-    return "%Y-%m"             if /^m/;
-    return "%Y"                if /^y/;
-    return "w%G-%V"            if /^w/;
+    return "%Y-%m-%d %H:%M:%S" if /^sec/;# seconds
+    return "%Y-%m-%d %H:%M"    if /^min/;# minutes
+    return "%Y-%m-%d %H"       if /^h/;# hours
+    return "%Y-%m-%d"          if /^d/;# days
+    return "%Y-%m"             if /^m/;# months
+    return "%Y"                if /^y/;# years
+    return "w%G-%V"            if /^w/;# weeks
     die "Unknown time spec '$_'";
 }
 
