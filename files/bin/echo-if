@@ -6,14 +6,14 @@ use strict; use warnings; use 5.014;
 
 use Getopt::Long qw/:config bundling require_order pass_through/;
 use Hash::Util qw/ lock_keys /;
-our $VERSION = '1.0.0';# Created: 2017-03-04
+our $VERSION = '1.0.1';# Created: 2017-03-04
 
 our %OPT = (
     quiet => 0,
 );
 our @OPT_SPEC =
 qw/ help|h version
-    expand|e! after|a=s before|b=s
+    expand|e! after|a=s@ before|b=s@
     quiet|q+
     code=s@ notcode=s@
     ignore-i=s@ ignore_re|ignore-re=s@
@@ -40,24 +40,26 @@ WARNING:
 OPTIONS
 
  --expand, -e           Expand templates in the messages
- --before, -b MESSAGE   Display message before command output
- --after,  -a MESSAGE   Display message after  command output
+ --before, -b MESSAGE   Display message before command output (+)
+ --after,  -a MESSAGE   Display message after  command output (+)
 
  --quiet, -q            Don't display command output, only display messages
 
- --code EXITCODE        Only echo message if command exits with given code
- --notcode EXITCODE     Only echo message if command does not exit with given code
+ --code EXITCODE        Only echo message if command exits with given code (+)
+ --notcode EXITCODE     Only echo message if command does not exit with given code (+)
 
- --match PATTERN        Generate output if any lines match globby PATTERN
- --match-re REGEXP      Generate output if any lines match REGEXP
+ --match PATTERN        Generate output if any lines match globby PATTERN (+)
+ --match-re REGEXP      Generate output if any lines match REGEXP (+)
 
- --ignore PATTERN       Ignore lines of output matching globby PATTERN
- --ignore-re REGEXP     Ignore lines of output matching REGEXP
+ --ignore PATTERN       Ignore lines of output matching globby PATTERN (+)
+ --ignore-re REGEXP     Ignore lines of output matching REGEXP (+)
 
  --report-status        Report any non-zero exit status
 
  --help, -h             this usage message
  --version              show script version
+
+(+) Option may be passed more than once.
 
 TEMPLATES
 
@@ -75,8 +77,8 @@ Supported variables:
 
 Supported commands:
 
-  {{start FORMAT}}      format command start time
-  {{finish FORMAT}}     format command completion time
+  {{start FORMAT}}      format command start time (see strftime in Time::Piece)
+  {{finish FORMAT}}     format command completion time (see strftime in Time::Piece)
 
 
 EXAMPLES
@@ -120,7 +122,7 @@ sub MAIN {
     my $pid = open3("<&STDIN", $FH, undef, @command);
 
     my ($delay_print, $test_lines);
-    $delay_print = 1 if $$opt{expand} and ($$opt{before}//'') =~ /\{\{(?:dt|seconds|finish)\b/;
+    $delay_print = 1 if $$opt{expand} and any($$opt{before}, [qr/\{\{(?:dt|seconds|finish)\b/], 0);
     $delay_print = 1 if $$opt{code} or $$opt{notcode};
     $test_lines  = 1 unless $$opt{code} or $$opt{notcode};
 
@@ -188,6 +190,8 @@ sub MAIN {
 
 sub any {
     my ($line, $pats, $dflt) = @_;
+    return $dflt unless defined($line);
+    return grep any($_, $pats, $dflt), @$line if 'ARRAY' eq ref($line);
     return $dflt unless $pats and @$pats;
     for (@$pats) {
         return 1 if $line =~ $_;
@@ -213,6 +217,7 @@ sub output {
 sub display {
     my ($msg, $opt) = @_;
     return unless defined($msg);
+    return map display($_, $opt), @$msg if 'ARRAY' eq ref($msg);
     $msg = fill_in($msg) if $$opt{expand};
     say $msg;
 }
