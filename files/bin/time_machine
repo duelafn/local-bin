@@ -159,7 +159,11 @@ if ($KEEP) {
     my $most_recent = shift @dirs;# ALWAYS save most recent transfer!
     die "Expected to find most recent transfer '$current', but found '$most_recent' instead.\n" unless $most_recent eq $current;
 
-    my @spec = sort { length($b) <=> length($a) } keys %$KEEP;
+    # Note: $KEEP format strings must must be meaningfully sorted by length
+    # (finer precision is longer). Beyond that, the formatted dates should
+    # be considered opaque and may not be comparable both between different
+    # spec levels, nor even comparable within a single spec level.
+    my @spec = sort { length($b) <=> length($a) } keys %$KEEP;# finer resolution first
     my %keep = ( parse_date($most_recent =~ s/_/ /gr)->strftime($spec[0]) => 1 );
     for my $name (@dirs) {
         next unless my $date = parse_date($name =~ s/_/ /gr);
@@ -174,7 +178,7 @@ if ($KEEP) {
                     if ($$KEEP{$spec[0]} ne '*' and scalar(keys(%keep)) >= $$KEEP{$spec[0]}) {
                         # This is a new, say, DAY but we already have as many
                         # DAYs as we want, move to next spec with non-zero
-                        # keeps. THis will become the first item of that spec.
+                        # keeps. This will become the first item of that spec.
                         shift @spec; shift @spec while @spec and !$$KEEP{$spec[0]};
                         if (@spec) {
                             $$KEEP{$spec[0]}++ if  $$KEEP{$spec[0]} =~ /^\d+$/;
@@ -209,13 +213,19 @@ sub parse_keeps {
 
 sub timespec_format {
     local $_ = shift;
+    # Note: longer entries must be more precise (smaller interval) than
+    # shorter entries. Also, make sure that formats are unambiguous (e.g.,
+    # "w2017-01" is week 1 in 2017, "2017-01" is month 1).
+    #
+    # Format strings are free-form beyond that and are free to change
+    # between versions.
     return "%Y-%m-%d %H:%M:%S" if /^sec/;# seconds
     return "%Y-%m-%d %H:%M"    if /^min/;# minutes
     return "%Y-%m-%d %H"       if /^h/;# hours
     return "%Y-%m-%d"          if /^d/;# days
+    return "w%G-%V"            if /^w/;# weeks
     return "%Y-%m"             if /^m/;# months
     return "%Y"                if /^y/;# years
-    return "w%G-%V"            if /^w/;# weeks
     die "Unknown time spec '$_'";
 }
 
