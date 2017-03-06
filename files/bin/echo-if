@@ -83,14 +83,17 @@ Supported commands:
 
 EXAMPLES
 
-Run git fsck looking for issues, only print the directory name if there is a problem:
+Run git gitt commands looking for issues, only print the directory name if
+there is something to see:
 
-  find git/repositories -name HEAD -execdir echo-if -eb '{{pwd}}' git fsck --no-progress \;
-
-Run git status recursively, only print the directory name if there are changes:
-
+  find git/repositories -name HEAD -execdir echo-if -eb '{{cwd}}' git fsck --no-progress \;
   find ~/ -name .git -execdir echo-if -eb '{{cwd}}' -a '' git status -s \;
 
+In a cron job, ignore "vanished" warnings. Unlike grep -v, this will still
+include the vanished warnings if there are any other problems. This could
+be useful if those vanished warnings explain the other errors.
+
+  echo-if -i "file has vanished" -i "some files vanished"  rsync -qa ...
 __USAGE__
 
 use Cwd;
