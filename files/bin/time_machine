@@ -1,0 +1,298 @@
+#!/usr/bin/perl
+use strict; use warnings; use 5.010;
+# Copyright (C) 2017  Dean Serenevy
+# This work is licensed under a Creative Commons Attribution 4.0 International License.
+
+our %opt;
+use Getopt::Long qw/:config bundling/;
+BEGIN {
+  our $VERSION = '4.0.0';# Created: 2008-11-07
+  my ($B,$N) = ("\e[1m","\e[0m");
+  %opt = ( qw/
+              keep-dirlinks 1  prune-hidden 0  prune-rcs 0  prune-backup 1
+              compress      0  sparse       1  human     1  recursive    1
+             /,
+           keep => "forever",
+         );
+  my @options = qw/help|h version verbose|v noact|no-act|dry-run DEBUG
+       keep-dirlinks! prune-hidden! prune-rcs! prune-backup!
+       compress! sparse! human! recursive! progress! verbose!
+       copy-unsafe-links! datetime|dt! one_file_system|one-file-system|x!
+       exclude=s@ include=s@ bwlimit=i keep=s hash!
+       /;
+  GetOptions \%opt, @options or ($opt{help} = 1);
+  $opt{DEBUG} = 1 if $opt{noact};
+  if ($opt{help} and !$^C) {
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    $opt{$_} = $opt{$_} ? "enabled" : "disabled" for map /^([^\|\!]+)/, grep /\!$/, @options;
+    print <<"USAGE"; exit; }
+usage: ${exe} [options] ${B}sources$N ${B}dest$N
+
+Uses rsync to copy contents of ${B}sources$N to ${B}dest$N/YYYY-MM-DD (or
+${B}dest$N/YYYY-MM-DD_HH:MM:SS). If another timestamped directory in ${B}dest$N
+exists, then unchanged files will be hard-linked in the new directory to
+the files in the most recent stamped directory. Old backups can be deleted
+via the --keep option.
+
+OPTIONS
+
+ --hash                Generate hashsums and only backup if something changed
+
+ --keep <spec>         delete copies according to the given spec ($B$opt{keep}$N)
+                           (local destinations only) Eg: "10d,10w,10m,*y"
+
+ --recursive           recurse into subdirectories ($B$opt{recursive}$N)
+ --compress            compress during transfer ($B$opt{compress}$N)
+ --datetime, --dt      label backups with time in addition to date ($B$opt{datetime}$N)
+
+ --human               output numbers in a human-readable format ($B$opt{human}$N)
+ --progress            show progress during transfer ($B$opt{progress}$N)
+
+ -v, --verbose         increase verbosity
+
+ --copy-unsafe-links   only "unsafe" symlinks are transformed ($B$opt{'copy-unsafe-links'}$N)
+ --keep-dirlinks       treat symlinked dir on receiver as dir ($B$opt{'keep-dirlinks'}$N)
+ --sparse              handle sparse files efficiently ($B$opt{sparse}$N)
+ --one-file-system     avoid crossing filesystem boundaries when recursing ($B$opt{one_file_system}$N)
+
+ --exclude <pat>       exclude files matching glob pattern
+ --include <pat>       don't exclude files matching glob pattern
+
+ --prune-hidden        prune hidden directories: ($B$opt{"prune-hidden"}$N)
+ --prune-rcs           prune revison control files: ($B$opt{"prune-rcs"}$N)
+ --prune-backup        prune backup-like files: ($B$opt{"prune-backup"}$N)
+
+ --upload              set bwlimit from /etc/serenevy/config
+ --download            set bwlimit from /etc/serenevy/config
+ --bwlimit <kBps>      maximum transfer rate in kilobytes per second
+
+ --no-act, --dry-run   don't change files, just list what would be done
+USAGE
+  if ($opt{version} and !$^C) {
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2]; print "$exe version $VERSION\n"; exit; }
+
+  eval "use Smart::Comments;" if $opt{DEBUG};
+}
+
+use Dean::Util qw/ qbash rofh parse_date ymd ymd_hms human2seconds find cat safe_pipe fprint /;
+use Path::Class;
+use Digest::SHA;
+use DateTime;
+no warnings "qw";
+my @RCS_PATS    = qw| .svn/ CVS/ blib/ {arch}/ .bzr/ _darcs/ RCS/ SCCS/ .git/ |;
+my @BACKUP_PATS = qw| *~ #*# *.bak *.tmp *.tmp-* |;
+my @ropts = qw/ -t --partial --fuzzy --perms --owner --group /;
+# my @ropts = qw/ -a /;
+
+sub digest { Digest::SHA->new(512)->addfile(rofh(@_))->hexdigest }
+our $DIGESTNAME = "SHA512SUMS";
+
+my $dest = pop @ARGV;
+$dest =~ s|/+$||;
+my $remote_dest = ($dest =~ /^(?:[\w.-]+\@)?[\w-]+(?:\.[\w-]+)*:/);
+
+my $hashfile = create_hashfile(\%opt, $dest, $remote_dest, @ARGV);
+
+push @ropts, get_links($dest, $remote_dest);
+my $date = ($opt{datetime} ? ymd_hms : ymd);
+$date =~ tr/ /_/;
+$dest .= "/$date";
+
+push @ropts, qw/ -e ssh /                                   if $remote_dest;
+push @ropts, "-l"                                           if !$opt{'copy-unsafe-links'};
+push @ropts, "-n", "-i"                                     if $opt{noact};
+
+push @ropts, "-r"                                           if $opt{recursive};
+push @ropts, "-z"                                           if $opt{compress};
+push @ropts, "-x"                                           if $opt{one_file_system};
+
+push @ropts, "--human-readable"                             if $opt{human};
+push @ropts, "--progress"                                   if $opt{progress};
+
+push @ropts, "-q"                                           if !$opt{verbose};
+push @ropts, "-v"                                           if $opt{verbose};
+
+push @ropts, "--copy-unsafe-links"                          if $opt{'copy-unsafe-links'};
+push @ropts, "--keep-dirlinks"                              if $opt{'keep-dirlinks'};
+push @ropts, "-S"                                           if $opt{sparse};
+
+push @ropts, map +(-f => "+ $_"), @{$opt{include}}          if $opt{include};
+push @ropts, map +(-f => "- $_"), @{$opt{exclude}}          if $opt{exclude};
+
+push @ropts, map +(-f => "- $_"), @RCS_PATS                 if $opt{'prune-rcs'};
+push @ropts, map +(-f => "- $_"), qw| .* |                  if $opt{'prune-hidden'};
+push @ropts, map +(-f => "- $_"), @BACKUP_PATS              if $opt{'prune-backup'};
+
+if ($opt{upload} or $opt{download}) {
+  eval {
+    if (open my $F, "<", "/etc/serenevy/config") {
+      no re 'taint';
+      my ($LOCAL_BIN) = map m#^LOCAL_BIN=['"]?([\w/.+-]+)#, <$F>;
+      push @INC, "$LOCAL_BIN/systems/lib" if $LOCAL_BIN;
+
+      require Sys::Serenevy;
+      my $CONFIG = Sys::Serenevy::CONFIG();
+
+      $opt{bwlimit} ||= int($$CONFIG{BANDWIDTH_UP_NICE}/8)   if $opt{upload};
+      $opt{bwlimit} ||= int($$CONFIG{BANDWIDTH_DOWN_NICE}/8) if $opt{download};
+    }
+  };
+}
+
+push @ropts, "--bwlimit=$opt{bwlimit}"                      if $opt{bwlimit};
+
+my $KEEP;
+$KEEP = parse_keeps($opt{keep}) if !$remote_dest and $opt{keep} !~ /forever/;
+
+$opt{DEBUG} and print "rsync @ropts @ARGV $dest\n";
+system "rsync", @ropts, @ARGV, $dest;
+
+if ($hashfile) {
+    seek $hashfile, 0, 0;
+    put_file( file($dest, $DIGESTNAME), $remote_dest, do { local $/; scalar <$hashfile>; } );
+}
+
+if ($KEEP) {
+    my $base    = dir($dest)->parent;
+    my $current = file($dest)->basename;
+    my @dirs = reverse get_dirs($base, $remote_dest);# dirs, newest to oldest
+    my $most_recent = shift @dirs;# ALWAYS save most recent transfer!
+    die "Expected to find most recent transfer '$current', but found '$most_recent' instead.\n" unless $most_recent eq $current;
+
+    my @spec = sort { length($b) <=> length($a) } keys %$KEEP;
+    my %keep = ( parse_date($most_recent =~ s/_/ /gr)->strftime($spec[0]) => 1 );
+    for my $name (@dirs) {
+        next unless my $date = parse_date($name =~ s/_/ /gr);
+        my $wanted = 0;
+        if (@spec) {
+            my $fmt = $date->strftime($spec[0]);
+            if (!exists($keep{$fmt})) {
+                if ($$KEEP{$spec[0]} eq '*' or scalar(keys(%keep)) < $$KEEP{$spec[0]}) {
+                    $keep{$fmt} = 1;
+                    $wanted = 1;
+
+                    if ($$KEEP{$spec[0]} ne '*' and scalar(keys(%keep)) >= $$KEEP{$spec[0]}) {
+                        # This is a new, say, DAY but we already have as many
+                        # DAYs as we want, move to next spec with non-zero
+                        # keeps. THis will become the first item of that spec.
+                        shift @spec; shift @spec while @spec and !$$KEEP{$spec[0]};
+                        if (@spec) {
+                            $$KEEP{$spec[0]}++ if  $$KEEP{$spec[0]} =~ /^\d+$/;
+                            %keep = ($date->strftime($spec[0]) => 1);
+                        }
+                    }
+                }
+            }
+        }
+
+        next if $wanted;
+        if ($opt{noact}) {
+            print "Would DELETE: ", $base->subdir($name), $/;
+        } else {
+            $base->subdir($name)->rmtree($opt{DEBUG});
+        }
+    }
+}
+
+
+sub parse_keeps {
+    my %keeps;
+    for (split /\s*[;:,]\s*/, $_[0]) {
+        die "Invalid 'keep' spec: $_" unless /^\s*(\d+|\*)\s*(\w+)\s*$/;
+        my ($num, $word) = ($1, $2);
+        my $fmt = timespec_format($word);
+        die "Repeated keep spec '$word'" if $keeps{$fmt};
+        $keeps{$fmt} = $num;
+    }
+    return \%keeps;
+}
+
+sub timespec_format {
+    local $_ = shift;
+    return "%Y-%m-%d %H:%M:%S" if /^sec/;
+    return "%Y-%m-%d %H:%M"    if /^min/;
+    return "%Y-%m-%d %H"       if /^h/;
+    return "%Y-%m-%d"          if /^d/;
+    return "%Y-%m"             if /^m/;
+    return "%Y"                if /^y/;
+    die "Unknown time spec '$_'";
+}
+
+sub get_links {
+    my ($dest, $remote) = @_;
+    if ($remote) {
+        say STDERR "WARNING: rsync --link-dest option only works for local targets";
+        return;
+    }
+    my @dates = get_dirs(@_);
+    return unless @dates;
+    $dest = dir($dest, $dates[-1])->absolute;
+    return "--link-dest=$dest/";
+}
+
+sub get_dirs {
+    my ($dest, $remote) = @_;
+    my @dates;
+    if ($remote) {
+        my ($host, $path) = split /:/, $dest, 2;
+        chomp(@dates = safe_pipe [ ssh => $host => "ls" => qbash($path) ]);
+        return sort @dates;
+    } else {
+        @dates = glob("$dest/*");
+        return sort grep s|^.*/(\d{4}\-\d\d\-\d\d(?:\D\d\d\D\d\d\D\d\d)?)/?$|$1|, @dates;
+    }
+}
+
+sub get_file {
+    my ($dest, $remote) = @_;
+    my @dates;
+    if ($remote) {
+        my ($host, $path) = split /:/, $dest, 2;
+        my @cmd = map qbash($_), "ssh", $host, "cat", qbash($path);
+        return qx| @cmd |;
+    } else {
+        return cat "$dest";
+    }
+}
+
+sub put_file {
+    my ($dest, $remote, $content) = @_;
+    my @dates;
+    if ($remote) {
+        my ($host, $path) = split /:/, $dest, 2;
+        my $ignore = safe_pipe [ ssh => -C => $host, tee => qbash($path) ], $content;
+    } else {
+        fprint "$dest", $content;
+    }
+}
+
+sub create_hashfile {
+    my ($opt, $dest, $remote_dest, @localpaths) = @_;
+    return unless $$opt{hash};
+
+    $hashfile = File::Temp->new;
+    say $hashfile digest($_), " ", $_ for sort(find(\@localpaths, -type => "f"));
+
+    my $do_sync = 1;
+    my $latest = (get_dirs($dest, $remote_dest))[-1];
+    if ($latest) {
+        $do_sync = 0;
+        seek $hashfile, 0, 0;
+        my $local;
+        my @remote_hashes = eval { get_file(file($dest, $latest, $DIGESTNAME), $remote_dest) };
+        for my $line (@remote_hashes) {
+            no warnings 'uninitialized';# if $hashfile ends and remote has more, then $local will be undef
+            $local = <$hashfile>;
+            s/\s+$// for $line, $local;
+            if (!defined($local) or $line ne $local) {
+                $do_sync = 1;
+                last;
+            }
+        }
+        # need perfect match, next read of hashfile should be undef:
+        $do_sync ||= !defined($local) || defined(<$hashfile>);
+    }
+
+    exit unless $do_sync;
+    return $hashfile;
+}
