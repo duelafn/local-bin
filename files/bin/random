@@ -6,13 +6,13 @@ use strict; use warnings; use 5.010;
 
 use Getopt::Long qw/:config bundling/;
 use Hash::Util qw/ lock_keys /;
-our $VERSION = '0.0000';# Created: 2013-01-17
+our $VERSION = '1.0';# Created: 2013-01-17
 
-our %OPT = (  );
+our %OPT = ( number => 1 );
 our @OPT_SPEC =
 qw/
       help|h version noact|no-act|dry-run DEBUG
-      nonempty! noncomment!
+      nonempty! noncomment! number|n=i
   /;
 sub USAGE { <<"__USAGE__" };
 usage: $_[0] [options] <NUMBER>
@@ -35,11 +35,15 @@ ACTIONS
     number
 
   $_[0] item <OPTIONS>
-    item from the list of options
+    item from the list of options (without replacement when n > 1)
 
   $_[0] line <FILE(S)>
   $_[0] --nonempty --noncomment line <FILE(S)>
-    line from the given file
+    line from the given file (pass "-" to read from STDIN)
+
+OPTIONS
+
+ -n NUM              Select NUM random items
 __USAGE__
 
 use Path::Class;
@@ -53,47 +57,61 @@ action [qw/ cron crontime /] => sub {
     my ($action, @args) = @_;
     my @hour = (23,0..5);
     my @min  = (0..59);
-    my $hour = $hour[rand @hour];
-    my $min  = $min[rand @min];
-    say "$min $hour * * *";
+    for (1..$OPT{number}) {
+        my $hour = $hour[rand @hour];
+        my $min  = $min[rand @min];
+        say "$min $hour * * *";
+    }
 };
 
 action item => sub {
     my ($action, @args) = @_;
-    say $args[rand @args];
+    while ($OPT{number} > 0 and @args) {
+        say splice @args, (0+rand @args), 1;
+    }
 };
 
 action line => sub {
     my ($action, @args) = @_;
-
+    my @lines;
     my $i = 1;
-    my $line;
     for my $file (@args) {
-        open my $F, "<", $file or die "Could not read $file: $!";
-        while (<$F>) {
-            next if $OPT{nonempty}   and !/\S/;
-            next if $OPT{noncomment} and /^\s*#/;
-            $line = $_ if rand($i++) < 1;
+        my $F;
+        if ($file eq '-') {
+            $F = \*STDIN;
+        } else {
+            open $F, "<", $file or die "Could not read $file: $!";
+        }
+        while (defined(my $l = <$F>)) {
+            next if $OPT{nonempty}   and $l !~ /\S/;
+            next if $OPT{noncomment} and $l =~ /^\s*(?:#|\/\/)/;
+            for my $n (0..($OPT{number}-1)) {
+                $lines[$n] = $l if rand($i) < 1;
+            }
+            $i++;
         }
     }
-    $line =~ s/(?:\015?\012|\015)+//;
-    say $line;
+    say s/(?:\015?\012|\015)+//r for @lines;
 };
 
 action number => sub {
     my ($action, @args) = @_;
     my @items = simple_range2list(@args);
-    say $items[rand @items];
+    for (1..$OPT{number}) {
+        say $items[rand @items];
+    }
 };
 
 action port => sub {
     my ($action, @args) = @_;
     my %bad = map { /^\w\S+\s+(\d+)/ ? ( $1 => 1 ) : () } file("/etc/services")->slurp;
-    my $port = 0;
-    while ($port < 1024 or $bad{$port}) {
-        $port = int rand 65536;
+    for (1..$OPT{number}) {
+        my $port = 0;
+        while ($port < 1024 or $bad{$port}) {
+            $port = int rand 65536;
+        }
+        say $port;
     }
-    say $port;
 };
 
 
@@ -109,7 +127,7 @@ elsif (@ARGV > 1) {
     $action = "item";
 }
 # If it is a file name, choose a random line
-elsif (-f $ARGV[0]) {
+elsif ($ARGV[0] eq '-' or -f $ARGV[0]) {
     $action = "line";
 }
 # If it looks like a range specification
