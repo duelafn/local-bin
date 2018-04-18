@@ -39,7 +39,6 @@ USAGE
 
 use Encode;
 use Unicode::UCD qw/ charinfo /;
-use Encode;
 use open ':encoding(UTF-8)', ':std';
 @ARGV = map decode("UTF-8", $_), @ARGV;
 
