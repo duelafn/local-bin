@@ -6,7 +6,7 @@ use strict; use warnings; use 5.010;
 
 use Getopt::Long qw/:config bundling/;
 use Hash::Util qw/ lock_keys /;
-our $VERSION = '1.0';# Created: 2013-01-17
+our $VERSION = '1.1';# Created: 2013-01-17
 
 our %OPT = ( number => 1 );
 our @OPT_SPEC =
@@ -22,12 +22,6 @@ usage: $_[0] [options] <NUMBER>
 
 ACTIONS
 
-  $_[0] crontime
-    time when you might want to schedule cronjobs
-
-  $_[0] port
-    unpriviliged port number not present in /etc/services
-
   $_[0] number <N>
   $_[0] number <N>..<M>
   $_[0] number <N>:<M>
@@ -41,9 +35,21 @@ ACTIONS
   $_[0] --nonempty --noncomment line <FILE(S)>
     line from the given file (pass "-" to read from STDIN)
 
+  $_[0] crontime
+    time when you might want to schedule cronjobs
+
+  $_[0] port
+    unpriviliged port number not present in /etc/services
+
+  $_[0] mac
+    random MAC address for spoofing
+
+  $_[0] ipv6
+    IPv6 ID (64-bit)
+
 OPTIONS
 
- -n NUM              Select NUM random items
+ -n NUM              generate NUM random items
 __USAGE__
 
 use Path::Class;
@@ -68,6 +74,17 @@ action item => sub {
     my ($action, @args) = @_;
     while ($OPT{number} > 0 and @args) {
         say splice @args, (0+rand @args), 1;
+    }
+};
+
+action ['ipv6', 'mac', 'MAC'] => sub {
+    my ($action, @args) = @_;
+    for (1..$OPT{number}) {
+        if ($$action{-name} =~ /v6/i) {
+            say join(":", map sprintf("%02x%02x", int(rand(256)), int(rand(256))), 1..4);
+        } else {
+            say join(":", map sprintf("%02x", int(rand(256))), 1..6);
+        }
     }
 };
 
@@ -150,10 +167,7 @@ sub action {
     my $name = shift;
     $name = [ $name ] unless ref($name);
     unshift @_, "-action" if 1 == @_;
-    my %a = @_;
-    $a{-name} //= $$name[0];
-
-    $ACTIONS{$_} = \%a for @$name;
+    $ACTIONS{$_} = { -name => $_, @_ } for @$name;
 }
 
 sub call_action {
