@@ -6,7 +6,7 @@ use strict; use warnings; use 5.010;
 
 use Getopt::Long qw/:config bundling/;
 use Hash::Util qw/ lock_keys /;
-our $VERSION = '1.1';# Created: 2013-01-17
+our $VERSION = '1.2';# Created: 2013-01-17
 
 our %OPT = ( number => 1 );
 our @OPT_SPEC =
@@ -113,19 +113,26 @@ action line => sub {
 
 action number => sub {
     my ($action, @args) = @_;
-    my @items = simple_range2list(@args);
-    for (1..$OPT{number}) {
-        say $items[rand @items];
+    if (1 == @args and $args[0] =~ /^9+$/) {
+        # Special case: 9999, ensure same length
+        say rand_9s($args[0]) for 1..$OPT{number};
+    }
+    elsif (1 == @args and $args[0] =~ /^\d+$/) {
+        say int(rand($args[0])) for 1..$OPT{number};
+    }
+    else {
+        my @items = simple_range2list(@args);
+        say $items[rand @items] for 1..$OPT{number};
     }
 };
 
-action port => sub {
+action ["port", "port4"] => sub {
     my ($action, @args) = @_;
     my %bad = map { /^\w\S+\s+(\d+)/ ? ( $1 => 1 ) : () } file("/etc/services")->slurp;
     for (1..$OPT{number}) {
         my $port = 0;
         while ($port < 1024 or $bad{$port}) {
-            $port = int rand 65536;
+            $port = int rand( ($$action{-name} =~ /4/) ? 9999 : 65536 );
         }
         say $port;
     }
@@ -162,6 +169,15 @@ elsif (
 
 call_action( $action => @ARGV );
 
+
+sub rand_9s {
+    my $max = shift;
+    my $n;
+    do {
+        $n = int(rand($max+1));
+    } while (length($n) != length($max));
+    return $n;
+}
 
 sub action {
     my $name = shift;
