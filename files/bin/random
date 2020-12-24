@@ -55,9 +55,25 @@ __USAGE__
 use Path::Class;
 use Dean::Util qw/ simple_range2list /;
 
+sub urandom { # read N bytes from urandom
+    state $FH;
+    unless ($FH) { open $FH, "<:raw", "/dev/urandom" or die "Error reading /dev/urandom"; }
+    sysread $FH, my $buf, $_[0], 0;
+    return $buf;
+}
+
 our %ACTIONS; sub action;
 action help => sub { usage() };
 
+action u8  => sub { for (1..$OPT{number}) { say unpack "C", urandom(1) } };
+action u16 => sub { for (1..$OPT{number}) { say unpack "S", urandom(2) } };
+action u32 => sub { for (1..$OPT{number}) { say unpack "L", urandom(4) } };
+action u64 => sub { for (1..$OPT{number}) { say unpack "Q", urandom(8) } };
+
+action i8  => sub { for (1..$OPT{number}) { say unpack "c", urandom(1) } };
+action i16 => sub { for (1..$OPT{number}) { say unpack "s", urandom(2) } };
+action i32 => sub { for (1..$OPT{number}) { say unpack "l", urandom(4) } };
+action i64 => sub { for (1..$OPT{number}) { say unpack "q", urandom(8) } };
 
 action [qw/ cron crontime /] => sub {
     my ($action, @args) = @_;
