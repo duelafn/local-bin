@@ -13,6 +13,7 @@ our @OPT_SPEC =
 qw/
       help|h version noact|no-act|dry-run DEBUG
       nonempty! noncomment! number|n=i
+      pattern|expression|e=s
   /;
 sub USAGE { <<"__USAGE__" };
 usage: $_[0] [options] <NUMBER>
@@ -32,7 +33,7 @@ ACTIONS
     item from the list of options (without replacement when n > 1)
 
   $_[0] line <FILE(S)>
-  $_[0] --nonempty --noncomment line <FILE(S)>
+  $_[0] --nonempty --noncomment -e PATTERN line <FILE(S)>
     line from the given file (pass "-" to read from STDIN)
 
   $_[0] crontime
@@ -118,6 +119,7 @@ action line => sub {
         while (defined(my $l = <$F>)) {
             next if $OPT{nonempty}   and $l !~ /\S/;
             next if $OPT{noncomment} and $l =~ /^\s*(?:#|\/\/)/;
+            next if $OPT{pattern}    and $l !~ /$OPT{pattern}/;
             for my $n (0..($OPT{number}-1)) {
                 $lines[$n] = $l if rand($i) < 1;
             }
