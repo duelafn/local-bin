@@ -1,67 +1,142 @@
-#!/usr/bin/perl
-# Copyright (C) 2017  Dean Serenevy
-# This work is licensed under a Creative Commons Attribution 4.0 International License.
-#
-use strict; use warnings; use 5.010;
+#!/usr/bin/perl -w
+# Copyright (C) 2010  Dean Serenevy
+use strict; use warnings;
+use 5.028; use experimental 'signatures';
 
-our %opt;
 use Getopt::Long qw/:config bundling/;
-BEGIN {
-  our $VERSION = '0.0223';# Created: 2010-01-19
-  GetOptions \%opt,
-    qw/help|h version noact|no-act|dry-run DEBUG
-       fix level|o=i dir recursive|r
-      / or ($opt{help} = 1);
-  if (($opt{help} || $opt{version}) and !$^C) {
-    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
-    print $opt{version} ? "$exe version $VERSION\n" : <<"USAGE"; exit; }
-usage: ${exe} file(s)
+use Hash::Util qw/ lock_keys /;
+our $VERSION = '12.0.0';# Created: 2010-01-19
+
+our %OPT = (  );
+our @OPT_SPEC =
+qw/ help|h version noact|no-act|dry-run DEBUG
+    fix level|o=i dir=s recursive|r
+    lossy! quality|Q=s
+  /;
+sub USAGE($exe) { <<"__USAGE__" };
+usage: $exe [options]
 
 If no files provided, selects all png images in current directory
 
 OPTIONS
 
  -r                  recursive
-
- --fix               Enable error recovery
- -o <level>          optimization level (0-7; default probably 2)
  --dir <path>        Write output file(s) to directory
-USAGE
-}
+
+OPTIPNG RELATED OPTIONS
+
+ -o <level>          optimization level (0-7; default probably 2)
+ --fix               Enable error recovery
+
+PNGQUANT RELATED OPTIONS
+
+ --lossy             enable pngquant lossy compression
+ --quality, -Q <N>   accept quality reduction N%, 10 < N < 100
+__USAGE__
 
 use Dean::Util qw/ pmap SYSTEM bytes2size nicef find /;
+use File::Path qw/ make_path /;
+use File::Copy qw/ cp /;
+use File::stat;
+use Path::Class;
+our @OPTIPNG_OPTS;
 
-my @OPTIPNG_OPTS;
-push @OPTIPNG_OPTS, "-simulate"       if $opt{noact};
-push @OPTIPNG_OPTS, "-fix"            if $opt{fix};
-push @OPTIPNG_OPTS, "-dir", $opt{dir} if $opt{dir};
-push @OPTIPNG_OPTS, "-o", $opt{level} if $opt{level};
+get_options( \%OPT, @OPT_SPEC );
+assertexe("optipng");
+assertexe("pngquant") if $OPT{lossy};
 
-my ($orig, $new);
-@ARGV = $opt{recursive} ? '.' : glob("*.png") unless @ARGV;
-@ARGV = map {
-  (-d $_) ? find([$_], qw/-type f -name *.png/) : $_
-} @ARGV if $opt{recursive};
-for (pmap { [ optipng($_) ] } @ARGV) {
-  next unless $$_[0];
-  $orig += $$_[0];
-  $new  += $$_[1];
+@ARGV = $OPT{recursive} ? '.' : glob("*.png") unless @ARGV;
+@ARGV = map { (-d $_) ? find([$_], qw/-type f -name *.png/) : $_ } @ARGV if $OPT{recursive};
+$OPT{quality} = "10-$OPT{quality}" if $OPT{quality} and $OPT{quality} !~ /\-/;
+
+my $convert_files = $OPT{lossy} ? qr/\.(?:jpg|gif)$/ : qr/\.jpg$/;
+assertexe("convert") if grep /$convert_files/, @ARGV;
+
+MAIN(\%OPT, @ARGV);
+
+
+sub MAIN($opt, @args) {
+    push @OPTIPNG_OPTS, "-simulate"       if $OPT{noact};
+    push @OPTIPNG_OPTS, "-fix"            if $OPT{fix};
+    push @OPTIPNG_OPTS, "-dir", $OPT{dir} if $OPT{dir} and not $OPT{lossy};
+    push @OPTIPNG_OPTS, "-o", $OPT{level} if $OPT{level};
+
+    make_path $OPT{dir} if $OPT{dir} and !-d $OPT{dir};
+
+    my ($orig, $new);
+    for (pmap { [ optimize($_) ] } @args) {
+        next unless $$_[0];
+        say "NOTICE: $$_[2] is @{[ bytes2size($$_[1] - $$_[0]) ]} larger than its source" if $$_[1] > $$_[0];
+        $orig += $$_[0];
+        $new  += $$_[1];
+    }
+
+    exit unless $orig and $new;
+    say "BEFORE: ", bytes2size($orig),
+      "  AFTER: ", bytes2size($new),
+      "  SAVED: ", bytes2size($orig-$new),
+      " (",nicef(100*($orig-$new)/$orig),"%)"
+    ;
 }
 
-exit unless $orig and $new;
-say "BEFORE: ", bytes2size($orig),
-  "  AFTER: ", bytes2size($new),
-  "  SAVED: ", bytes2size($orig-$new),
-  " (",nicef(100*($orig-$new)/$orig),"%)"
-;
 
+sub optimize($file) {
+    return unless $OPT{dir} or -w $file;
+    my $pre_size = -s $file;
+    my $fout = $OPT{dir} ? file($OPT{dir}, file($file)->basename)->stringify : $file;
+    $fout =~ s/\.(?:jpg|gif)$/.png/;
 
-sub optipng {
-  my $file = shift;
-  return unless -w $file;
-  my $pre_size = -s $file;
-  my $res = SYSTEM optipng => @OPTIPNG_OPTS, '--', $file, \">/dev/null 2>&1";
-  warn "Error optimizing '$file'\n" unless 0 == $res;
-  my $post_size = -s $file;
-  return wantarray ? ($pre_size, $post_size) : $pre_size - $post_size;
+    if (($OPT{lossy} or $file =~ /\.jpg$/) and not $OPT{noact}) {
+        if ($file =~ /\.jpg$/) {
+            return unless 0 == system(convert => $file, $fout);
+            $file = $fout;
+        }
+        elsif ($file =~ /\.gif$/) {
+            return unless 0 == system(convert => $file, $fout);
+            $file = $fout;
+        }
+
+        my @opt = (qw/ --skip-if-larger -f --strip /, -o => $fout);
+        if ($OPT{quality}) { push @opt, -Q => $OPT{quality}; }
+
+        my $res = SYSTEM pngquant => @opt, '--', $file, \">/dev/null 2>&1";
+        $res = $res >> 8;
+        warn "Error in pngquant on '$file'\n" unless (0 == $res or 98 == $res or 99 == $res);
+
+        # --skip-if-larger may not create a file. If we are moving the file
+        # to a new directory, we may need to copy ourselves.
+        if ($file ne $fout and !-e $fout) {
+            cp $file, $fout;
+            my $stat = stat $file;
+            utime $stat->atime, $stat->mtime, $fout;
+        }
+    }
+
+    my $res = SYSTEM optipng => @OPTIPNG_OPTS, '--', $file, \">/dev/null 2>&1";
+    warn "Error in optipng on '$file'\n" unless 0 == $res;
+    my $post_size = -s $fout;
+    return wantarray ? ($pre_size, $post_size, $fout) : $pre_size - $post_size;
+}
+
+sub assertexe($exe) {
+    for my $path (split /:/, $ENV{PATH}) {
+        return if -f "$path/$exe" and -x "$path/$exe";
+    }
+    die "Executable '$exe' not found\n";
+}
+
+sub get_options {
+    my $OPT = shift;
+    GetOptions $OPT, @_ or usage(1);
+    usage() if $$OPT{help} || $$OPT{version};
+    lock_keys(%$OPT, keys %$OPT, map /^(\w+)/, @_);
+}
+
+sub usage {
+    my $status = (@_ && $_[0] =~ /^\d+$/) ? shift(@_) : 0+@_;
+    print @_, "\n" if @_;
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    $OPT{$_} = $OPT{$_} ? "enabled" : "disabled" for map /^(\w+).*!/, @OPT_SPEC;
+    print $OPT{version} ? "$exe version $VERSION\n" : USAGE($exe);
+    exit $status;
 }
