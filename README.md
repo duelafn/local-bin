@@ -11,7 +11,7 @@ Released under the CC-BY License.
 DEPENDENCIES
 ============
 
-- Dean::Util  (http://dean.serenevy.net/code/projects/Dean::Util)
+- Dean::Util  (https://github.com/duelafn/perl-dean-util)
 - Path::Class
 
 
