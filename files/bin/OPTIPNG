@@ -11,7 +11,7 @@ our %OPT = (  );
 our @OPT_SPEC =
 qw/ help|h version noact|no-act|dry-run DEBUG
     fix level|o=i dir=s recursive|r
-    lossy! quality|Q=s
+    lossy! quality|Q=s palette|P=i
   /;
 sub USAGE($exe) { <<"__USAGE__" };
 usage: $exe [options]
@@ -20,17 +20,18 @@ If no files provided, selects all png images in current directory
 
 OPTIONS
 
- -r                  recursive
+ -r                  recursively optimize .png files
  --dir <path>        Write output file(s) to directory
 
 OPTIPNG RELATED OPTIONS
 
- -o <level>          optimization level (0-7; default probably 2)
+ -o <level>          optimization level (0-7; default typically 2)
  --fix               Enable error recovery
 
 PNGQUANT RELATED OPTIONS
 
  --lossy             enable pngquant lossy compression
+ --palette, -P <N>   target palette size
  --quality, -Q <N>   accept quality reduction N%, 10 < N < 100
 __USAGE__
 
@@ -42,15 +43,16 @@ use Path::Class;
 our @OPTIPNG_OPTS;
 
 get_options( \%OPT, @OPT_SPEC );
-assertexe("optipng");
-assertexe("pngquant") if $OPT{lossy};
 
 @ARGV = $OPT{recursive} ? '.' : glob("*.png") unless @ARGV;
 @ARGV = map { (-d $_) ? find([$_], qw/-type f -name *.png/) : $_ } @ARGV if $OPT{recursive};
 $OPT{quality} = "10-$OPT{quality}" if $OPT{quality} and $OPT{quality} !~ /\-/;
 
 my $convert_files = $OPT{lossy} ? qr/\.(?:jpg|gif)$/ : qr/\.jpg$/;
-assertexe("convert") if grep /$convert_files/, @ARGV;
+$convert_files = grep /$convert_files/, @ARGV;
+assertexe("convert")  if $convert_files;
+assertexe("pngquant") if $OPT{lossy} or $convert_files;
+assertexe("optipng");
 
 MAIN(\%OPT, @ARGV);
 
@@ -98,6 +100,7 @@ sub optimize($file) {
 
         my @opt = (qw/ --skip-if-larger -f --strip /, -o => $fout);
         if ($OPT{quality}) { push @opt, -Q => $OPT{quality}; }
+        if ($OPT{palette}) { push @opt, $OPT{palette}; }
 
         my $res = SYSTEM pngquant => @opt, '--', $file, \">/dev/null 2>&1";
         $res = $res >> 8;
@@ -130,6 +133,7 @@ sub get_options {
     GetOptions $OPT, @_ or usage(1);
     usage() if $$OPT{help} || $$OPT{version};
     lock_keys(%$OPT, keys %$OPT, map /^(\w+)/, @_);
+    $$OPT{lossy} = 1 if $$OPT{palette} or $$OPT{quality};
 }
 
 sub usage {
