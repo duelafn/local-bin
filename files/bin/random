@@ -6,7 +6,7 @@ use strict; use warnings; use 5.010;
 
 use Getopt::Long qw/:config bundling/;
 use Hash::Util qw/ lock_keys /;
-our $VERSION = '1.2';# Created: 2013-01-17
+our $VERSION = '9.0201';# Created: 2013-01-17
 
 our %OPT = ( number => 1 );
 our @OPT_SPEC =
@@ -39,7 +39,7 @@ ACTIONS
   $_[0] crontime
     time when you might want to schedule cronjobs
 
-  $_[0] port
+  $_[0] port | port4
     unpriviliged port number not present in /etc/services
 
   $_[0] mac
@@ -47,6 +47,8 @@ ACTIONS
 
   $_[0] ipv6
     IPv6 ID (64-bit)
+
+  $_[0] u8 | u16 | u32 | u64 | i8 | i16 | i32 | i64
 
 OPTIONS
 
@@ -91,6 +93,7 @@ action item => sub {
     my ($action, @args) = @_;
     while ($OPT{number} > 0 and @args) {
         say splice @args, (0+rand @args), 1;
+        $OPT{number} -= 1;
     }
 };
 
