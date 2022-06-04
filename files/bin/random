@@ -2,7 +2,8 @@
 # Copyright (C) 2017  Dean Serenevy
 # This work is licensed under a Creative Commons Attribution 4.0 International License.
 #
-use strict; use warnings; use 5.010;
+use strict; use warnings;
+use 5.028; use experimental 'signatures';
 
 use Getopt::Long qw/:config bundling/;
 use Hash::Util qw/ lock_keys /;
@@ -50,6 +51,9 @@ ACTIONS
 
   $_[0] u8 | u16 | u32 | u64 | i8 | i16 | i32 | i64
 
+  $_[0] hello
+    Random hello fresh recipe
+
 OPTIONS
 
  -n NUM              generate NUM random items
@@ -78,8 +82,9 @@ action i16 => sub { for (1..$OPT{number}) { say unpack "s", urandom(2) } };
 action i32 => sub { for (1..$OPT{number}) { say unpack "l", urandom(4) } };
 action i64 => sub { for (1..$OPT{number}) { say unpack "q", urandom(8) } };
 
-action [qw/ cron crontime /] => sub {
-    my ($action, @args) = @_;
+action [qw/hello fresh/] => sub { say "row ", 1+int(rand(15)), ", col ", 1+int(rand(3)) };
+
+action [qw/ cron crontime /] => sub($action, @args) {
     my @hour = (23,0..5);
     my @min  = (0..59);
     for (1..$OPT{number}) {
@@ -89,16 +94,14 @@ action [qw/ cron crontime /] => sub {
     }
 };
 
-action item => sub {
-    my ($action, @args) = @_;
+action item => sub($action, @args) {
     while ($OPT{number} > 0 and @args) {
         say splice @args, (0+rand @args), 1;
         $OPT{number} -= 1;
     }
 };
 
-action ['ipv6', 'mac', 'MAC'] => sub {
-    my ($action, @args) = @_;
+action ['ipv6', 'mac', 'MAC'] => sub($action, @args) {
     for (1..$OPT{number}) {
         if ($$action{-name} =~ /v6/i) {
             say join(":", map sprintf("%02x%02x", int(rand(256)), int(rand(256))), 1..4);
@@ -108,8 +111,7 @@ action ['ipv6', 'mac', 'MAC'] => sub {
     }
 };
 
-action line => sub {
-    my ($action, @args) = @_;
+action line => sub($action, @args) {
     my @lines;
     my $i = 1;
     for my $file (@args) {
@@ -132,8 +134,7 @@ action line => sub {
     say s/(?:\015?\012|\015)+//r for @lines;
 };
 
-action number => sub {
-    my ($action, @args) = @_;
+action number => sub($action, @args) {
     if (1 == @args and $args[0] =~ /^9+$/) {
         # Special case: 9999, ensure same length
         say rand_9s($args[0]) for 1..$OPT{number};
@@ -147,8 +148,7 @@ action number => sub {
     }
 };
 
-action ["port", "port4"] => sub {
-    my ($action, @args) = @_;
+action ["port", "port4"] => sub($action, @args) {
     my %bad = map { /^\w\S+\s+(\d+)/ ? ( $1 => 1 ) : () } file("/etc/services")->slurp;
     for (1..$OPT{number}) {
         my $port = 0;
