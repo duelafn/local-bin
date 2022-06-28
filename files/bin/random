@@ -82,7 +82,7 @@ action i16 => sub { for (1..$OPT{number}) { say unpack "s", urandom(2) } };
 action i32 => sub { for (1..$OPT{number}) { say unpack "l", urandom(4) } };
 action i64 => sub { for (1..$OPT{number}) { say unpack "q", urandom(8) } };
 
-action [qw/hello fresh/] => sub { say "row ", 1+int(rand(15)), ", col ", 1+int(rand(3)) };
+action [qw/hello fresh/] => sub { say "row ", 1+int(rand(20)), ", col ", 1+int(rand(3)) };
 
 action [qw/ cron crontime /] => sub($action, @args) {
     my @hour = (23,0..5);
