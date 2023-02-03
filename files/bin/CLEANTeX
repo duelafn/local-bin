@@ -1,69 +1,106 @@
-#!/usr/bin/perl
-# Copyright (C) 2017  Dean Serenevy
-# This work is licensed under a Creative Commons Attribution 4.0 International License.
+#!/usr/bin/perl -w
+# Copyright (C) 2023  Dean Serenevy
 #
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+# more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 use strict; use warnings;
+use 5.028; use experimental 'signatures';
 
-our %opt;
-use vars qw/$DEBUG $no_act/;
 use Getopt::Long qw/:config bundling/;
-BEGIN {
-  our $VERSION = '5.0005';# Created: 2005-01-26
-  my ($B,$N) = ("\e[1m","\e[0m");
-  %opt = ( DEBUG => \$DEBUG, 'dry-run' => \$no_act, 'no-act' => \$no_act, interactive => \($opt{i}) );
-  GetOptions \%opt, qw/help|h v version dry-run no-act DEBUG i interactive p r/ or ($opt{help} = 1);
-  if (($opt{help}) and !$^C) {
-    require File::Spec; my $exe = (File::Spec->splitpath($0))[2]; print <<"USAGE"; exit; }
-usage: ${exe} [options]
+use Hash::Util qw/ lock_keys /;
+our $VERSION = '6.0.0';# Created: 2005-01-26
+
+our %OPT = (  );
+our @OPT_SPEC =
+qw/ help h version noact|no-act|dry-run DEBUG
+    interactive|i! all|a recursive|r!
+  /;
+sub USAGE($exe, $long) { local $_ = <<"__USAGE__"; $long ? s/^# ?//gmr : s/^#.*\n//gmr };
+usage: $exe [options]
 
 OPTIONS
 
- -p                  preserve ps and pdf files
- -r                  recursive
- -i, --interactive   ask before removing files
+ --all, -a           delete ps and pdf files also
+ --recursive, -r     recursive
+ --interactive, -i   ask before removing files
 
  --no-act,
- --dry-run           don't delete files, just show which ones would be deleted
+ --dry-run           don't delete files, just list what would be done
 
-USAGE
-  if (($opt{v} or $opt{version}) and !$^C) {
-    require File::Spec; my $exe = (File::Spec->splitpath($0))[2]; print "$exe version $VERSION\n"; exit; }
+ --DEBUG             print additional information while running
+ --help, -h          usage message (long or short)
+ --version           show script version
+__USAGE__
+
+use Dean::Util qw/ format_cols natural_sort Tf find /;
+use File::Glob qw/ bsd_glob /;
+use File::Spec::Functions qw/ splitpath catpath /;
+
+get_options( \%OPT, @OPT_SPEC );
+MAIN(\%OPT, @ARGV);
+
+
+sub MAIN($opt, @paths) {
+    @paths = ('.') unless @paths;
+
+    my @ext     = qw/ tex~ aux dvi log bbl blg idx ilg ind toc out lab six nav snm synctex.gz /;
+    my @support = qw/ texput.lgpl /;
+    push @ext,    qw/ ps pdf / if $OPT{all};
+    my @texfiles;
+
+    if ($OPT{recursive}) {
+        @texfiles = find \@paths, -name => "*.tex";
+    } else {
+        @texfiles = map bsd_glob("$_/*.tex"), @paths;
+    }
+
+    printf "Found %d texfiles\n", 0+@texfiles if $OPT{DEBUG};
+    exit unless @texfiles;
+
+    my @goners;
+    for my $file (@texfiles) {
+        my ($vol, $path, $name) = splitpath($file);
+        my $base = ($file =~ s/\.tex$//r);
+        push @goners, grep -e $_, map "$base.$_", @ext;
+        push @goners, grep -e $_, map catpath($vol, $path, $_), @support;
+    }
+
+    exit unless @goners;
+    @goners = natural_sort @goners;
+
+    printf "Found %d files to delete\n", 0+@goners if $OPT{noact} || $OPT{DEBUG};
+    print format_cols \@goners if $OPT{noact} || $OPT{DEBUG} || $OPT{interactive};
+
+    if ($OPT{interactive}) {
+        print "Delete these files? [Y/n] ";
+        exit unless Tf;
+    }
+
+    unlink @goners unless $OPT{noact};
 }
 
-use Dean::Util qw/format_cols natural_sort Tf find/;
-my @DIRS = @ARGV ? @ARGV : ('.');
-@ARGV = ();
 
-my @ext = qw/ tex~ aux dvi log bbl blg idx ilg ind toc out lab six nav snm synctex.gz /;
-my @support = qw/ texput.lgpl /;
-push @ext, qw|ps pdf| unless $opt{p};
-my @texfiles;
-
-if ($opt{r}) { @texfiles = find \@DIRS, -name => "*.tex" }
-else         { @texfiles = map glob("$_/*.tex"), @DIRS   }
-
-$DEBUG && printf "Found %d texfiles\n", 0+@texfiles;
-exit unless @texfiles;
-
-my @goners;
-for my $f (@texfiles) {
-  $f =~ s/\.tex$//;
-  for (@ext) {
-    push @goners, "$f.$_" if -e "$f.$_";
-  }
-}
-for (@support) {
-  push @goners, $_ if -e $_;
+sub get_options {
+    my $OPT = shift;
+    GetOptions $OPT, @_ or usage(1);
+    usage() if $$OPT{help} || $$OPT{h} || $$OPT{version};
+    lock_keys(%$OPT, keys %$OPT, map /^(\w+)/, @_);
 }
 
-exit unless @goners;
-@goners = natural_sort @goners;
-$no_act || $DEBUG and printf "Found %d files to delete\n", 0+@goners;
-print format_cols \@goners if $DEBUG or $no_act or $opt{i};
-
-if ($opt{i}) {
-  print "Delete these files? [Y/n] ";
-  exit unless Tf;
-} elsif ($no_act) { exit }
-
-unlink @goners;
+sub usage {
+    my $status = (@_ && $_[0] =~ /^\d+$/) ? shift(@_) : 0+@_;
+    print @_, "\n" if @_;
+    require File::Spec; my $exe = (File::Spec->splitpath($0))[2];
+    $OPT{$_} = $OPT{$_} ? "enabled" : "disabled" for map /^(\w+).*!/, @OPT_SPEC;
+    print $OPT{version} ? "$exe version $VERSION\n" : USAGE($exe, $OPT{help});
+    exit $status;
+}
