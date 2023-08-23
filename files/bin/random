@@ -37,17 +37,11 @@ ACTIONS
   $_[0] --nonempty --noncomment -e PATTERN line <FILE(S)>
     line from the given file (pass "-" to read from STDIN)
 
-  $_[0] crontime
-    time when you might want to schedule cronjobs
-
-  $_[0] port | port4
-    unpriviliged port number not present in /etc/services
-
-  $_[0] mac
-    random MAC address for spoofing
-
-  $_[0] ipv6
-    IPv6 ID (64-bit)
+  $_[0] crontime       # time when you might want to schedule cronjobs
+  $_[0] port | port4   # unpriviliged port (not in /etc/services)
+  $_[0] mac            # random MAC address for spoofing
+  $_[0] ipv6           # IPv6 ID (64-bit)
+  $_[0] birthday       # fake birthday
 
   $_[0] u8 | u16 | u32 | u64 | i8 | i16 | i32 | i64
 
@@ -60,7 +54,8 @@ OPTIONS
 __USAGE__
 
 use Path::Class;
-use Dean::Util qw/ simple_range2list /;
+use Dean::Util qw/ simple_range2list nice_date /;
+use DateTime;
 
 sub urandom { # read N bytes from urandom
     state $FH;
@@ -91,6 +86,17 @@ action [qw/ cron crontime /] => sub($action, @args) {
         my $hour = $hour[rand @hour];
         my $min  = $min[rand @min];
         say "$min $hour * * *";
+    }
+};
+
+action birthday => sub($action, @args) {
+    for (1..$OPT{number}) {
+        my $age = 25 + int(rand(55-25));
+        my $mon = 1+int(rand(12));
+        my $year = DateTime->now->year() - $age;
+        my $day = 1+int(rand(DateTime->last_day_of_month(year => $year, month => $mon)->day));
+        my $bd = DateTime->new(year => $year, month => $mon, day => $day);
+        say $bd->strftime("%e %b %Y"), "  ", $bd->ymd, "  age: $age";
     }
 };
 
