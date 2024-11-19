@@ -166,9 +166,11 @@ action ["port", "port4"] => sub($action, @args) {
 };
 
 
+push @ARGV, '-' unless @ARGV;
 get_options( \%OPT, @OPT_SPEC );
 
 my $action;
+
 # An existing action name trumps everything
 if (exists $ACTIONS{$ARGV[0]}) {
     $action = shift @ARGV;
