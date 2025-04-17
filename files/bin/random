@@ -15,6 +15,7 @@ qw/
       help|h version noact|no-act|dry-run DEBUG
       nonempty! noncomment! number|n=i
       pattern|expression|e=s
+      insensitive|i!
   /;
 sub USAGE { <<"__USAGE__" };
 usage: $_[0] [options] <NUMBER>
@@ -130,7 +131,7 @@ action line => sub($action, @args) {
         while (defined(my $l = <$F>)) {
             next if $OPT{nonempty}   and $l !~ /\S/;
             next if $OPT{noncomment} and $l =~ /^\s*(?:#|\/\/)/;
-            next if $OPT{pattern}    and $l !~ /$OPT{pattern}/;
+            next if $OPT{pattern}    and ($OPT{insensitive} ? $l !~ /$OPT{pattern}/i : $l !~ /$OPT{pattern}/);
             for my $n (0..($OPT{number}-1)) {
                 $lines[$n] = $l if rand($i) < 1;
             }
