@@ -9,7 +9,7 @@ use Hash::Util qw/ lock_keys /;
 our $VERSION = '1.2.0';# Created: 2011-12-24
 
 our %OPT = (  );
-our @OPT_SPEC = qw/ help|h version path=s@ e class /;
+our @OPT_SPEC = qw/ help|h version path=s@ e class fonts|font|f /;
 sub USAGE { <<"USAGE" };
 usage: $_[0] [options] PATTERN
        $_[0] --class NAME
@@ -34,6 +34,7 @@ Search through unicode symbols for pattern. Eg:
 OPTIONS
 
  -e                  treat pattern as a regular expression
+ --fonts             list fonts containing each glyph
  --path <dir>        path to examine for UnicodeData.txt
 USAGE
 
@@ -82,6 +83,22 @@ sub show_char {
     $$info{name} //= "Private Use";
     $$info{unicode10} = $$info{unicode10} ? "  Unicode 1.0 name: $$info{unicode10}" : "";
     say "0x$$info{code}  $$info{chr}  \\p{$$info{category}}  $$info{name}$$info{unicode10}";
+    if ($OPT{fonts}) {
+        my @fonts = fonts($$info{code});
+        if (@fonts > 20) { splice @fonts, 16; push @fonts, "..."; }
+        say "   FONTS: ", join ", ", @fonts if @fonts;
+    }
+}
+
+sub fonts {
+    my $hex = shift;
+    open my $fh, "-|", "fc-list", "-f", '%{family}\n', ":charset=$hex" or die;
+    my %seen;
+    while (defined(my $line = <$fh>)) {
+        chomp($line);
+        $seen{$line} = 1;
+    }
+    sort keys %seen;
 }
 
 sub get_options {
