@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-# Copyright (C) 2017  Dean Serenevy
+# Copyright (C) 2017-2026  Dean Serenevy
 # This work is licensed under a Creative Commons Attribution 4.0 International License.
 #
 use strict; use warnings;
@@ -43,6 +43,7 @@ ACTIONS
   $_[0] mac            # random MAC address for spoofing
   $_[0] ipv6           # IPv6 ID (64-bit)
   $_[0] birthday       # fake birthday
+  $_[0] magic          # magic deck
 
   $_[0] u8 | u16 | u32 | u64 | i8 | i16 | i32 | i64
 
@@ -54,9 +55,10 @@ OPTIONS
  -n NUM              generate NUM random items
 __USAGE__
 
-use Path::Class;
-use Dean::Util qw/ simple_range2list nice_date /;
 use DateTime;
+use Dean::Util qw/ simple_range2list nice_date random_binomial first round /;
+use List::Util qw/ shuffle /;
+use Path::Class;
 
 sub urandom { # read N bytes from urandom
     state $FH;
@@ -139,6 +141,26 @@ action line => sub($action, @args) {
         }
     }
     say s/(?:\015?\012|\015)+//r for @lines;
+};
+
+action magic => sub($action) {
+    my sub random_colors {
+        state $prob = [ .25, .85, .90, .95, 1 ];
+        my $r = rand;
+        my $nr_colors = first { $r < $$prob[$_-1] } 1..5;
+        (shuffle qw/ R G B K W /)[0..$nr_colors-1]
+    }
+
+    for (1..$OPT{number}) {
+        say "" if $_ > 1;
+        say "Colors: ", join ", ", random_colors();
+        say "Creatures (0-2 cost): ", my $cheap_creatures     = 4 + random_binomial(10);
+        say "Creatures (3-4 cost): ", my $mid_creatures       = 4 + random_binomial(10);
+        say "Creatures (5+  cost): ", my $expensive_creatures = 0 + random_binomial(10);
+        my $nr_spells = 40 - $expensive_creatures - $mid_creatures - $cheap_creatures;
+        say "Spells (0-3 cost): ", my $cheap_spells = round( $nr_spells * 2 / 3 );
+        say "Spells (4+  cost): ", $nr_spells - $cheap_spells;
+    }
 };
 
 action number => sub($action, @args) {
