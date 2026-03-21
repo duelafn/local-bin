@@ -2,7 +2,8 @@
 # Copyright (C) 2017  Dean Serenevy
 # This work is licensed under a Creative Commons Attribution 4.0 International License.
 #
-use strict; use warnings; use 5.010;
+use strict; use warnings;
+use 5.028; use experimental 'signatures';
 
 use Getopt::Long qw/:config bundling/;
 use Hash::Util qw/ lock_keys /;
@@ -39,50 +40,91 @@ OPTIONS
 USAGE
 
 use Encode;
-use Unicode::UCD qw/ charinfo /;
+use Unicode::UCD qw/ charinfo charprop charprops_all /;
 use open ':encoding(UTF-8)', ':std';
 @ARGV = map decode("UTF-8", $_), @ARGV;
 
+our %CATEGORY = (
+    Cc => "Control",
+    Cf => "Format",
+    Co => "Private Use",
+    Cs => "Surrrogate",
+    Ll => "Lowercase Letter",
+    Lm => "Modifier Letter",
+    Lo => "Other Letter",
+    Lt => "Titlecase Letter",
+    Lu => "Uppercase Letter",
+    Mc => "Spacing Mark",
+    Me => "Enclosing Mark",
+    Mn => "Nonspacing Mark",
+    Nd => "Decimal Number",
+    Nl => "Letter Number",
+    No => "Other Number",
+    Pc => "Connector Punctuation",
+    Pd => "Dash Punctuation",
+    Pe => "Close Punctuation",
+    Pf => "Final Punctuation",
+    Pi => "Initial Punctuation",
+    Po => "Other Punctuation",
+    Ps => "Open Punctuation",
+    Sc => "Currency Symbol",
+    Sk => "Modifier Symbol",
+    Sm => "Math Symbol",
+    So => "Other Symbol",
+    Zl => "Line Separator",
+    Zp => "Paragraph Separator",
+    Zs => "Space Separator",
+);
+
 get_options( \%OPT, @OPT_SPEC );
 
-my $DATA;
-for (@{$OPT{path} || []}, "/usr/share/unicode", @INC) {
-    next if ref;
-    for my $fname ("$_/UnicodeData.txt", "$_/unicore/UnicodeData.txt") {
-        if (-f $fname) {
-            open $DATA, "<", $fname or die "Error reading $fname: $!";
-            last;
+# Process any single-char patterns first
+while (@ARGV and length($ARGV[0]) == 1) {
+    show_char(ord $ARGV[0]);
+    shift @ARGV;
+}
+
+# if anything left, do a search
+if (@ARGV) {
+    search("@ARGV");
+}
+
+sub search($pat) {
+    my $DATA;
+    for (@{$OPT{path} || []}, "/usr/share/unicode", @INC) {
+        next if ref;
+        for my $fname ("$_/UnicodeData.txt", "$_/unicore/UnicodeData.txt") {
+            if (-f $fname) {
+                open $DATA, "<", $fname or die "Error reading $fname: $!";
+                last;
+            }
         }
     }
-}
-die "Unable to locate unicore/UnicodeData.txt (do you need to install the unicode-data package?)" unless $DATA;
+    die "Unable to locate unicore/UnicodeData.txt (do you need to install the unicode-data package?)" unless $DATA;
 
-my $pat = join " ", @ARGV;
+    if ($OPT{e})     { $pat = qr/$pat/i }
+    if ($OPT{class}) { $pat = qr/;\Q$pat\E;/ }
+    else             { $pat = qr/\Q$pat\E/i }
 
-if (length $pat == 1) {
-    show_char(ord $pat);
-    exit;
-}
-
-
-if ($OPT{e})     { $pat = qr/$pat/i }
-if ($OPT{class}) { $pat = qr/;\Q$pat\E;/ }
-else             { $pat = qr/\Q$pat\E/i }
-
-while (my $line = <$DATA>) {
-    next unless $line =~ $pat;
-    my @F = split /;/, $line;
-    show_char("0x$F[0]");
+    while (my $line = <$DATA>) {
+        next unless $line =~ $pat;
+        my @F = split /;/, $line;
+        show_char("0x$F[0]");
+    }
 }
 
-
-sub show_char {
-    my $info = charinfo(shift);
+sub show_char($codepoint) {
+    my $info = charinfo($codepoint);
     return unless $$info{code};
     $$info{chr} = chr(hex($$info{code}));
     $$info{name} //= "Private Use";
     $$info{unicode10} = $$info{unicode10} ? "  Unicode 1.0 name: $$info{unicode10}" : "";
-    say "0x$$info{code}  $$info{chr}  \\p{$$info{category}}  $$info{name}$$info{unicode10}";
+    my @props = props($codepoint);
+    # push @props, "'$CATEGORY{$$info{category}}'" if $CATEGORY{$$info{category}};
+    push @props, "Numeric" if $$info{category} =~ /^N[dlo]$/; # Rust .is_numeric()
+    push @props, "Control" if $$info{category} eq 'Cc'; # Rust .is_control()
+    $$info{props} = @props ? "  <@props>" : "";
+    say "0x$$info{code}  $$info{chr}  \\p{$$info{category}}  $$info{name}$$info{unicode10}$$info{props}";
     if ($OPT{fonts}) {
         my @fonts = fonts($$info{code});
         if (@fonts > 20) { splice @fonts, 16; push @fonts, "..."; }
@@ -90,8 +132,27 @@ sub show_char {
     }
 }
 
-sub fonts {
-    my $hex = shift;
+sub props($codepoint) {
+    state %KEEP = map +($_, 1), (
+        qw/ Alphabetic Lowercase Uppercase White_Space /, # Rust char .is_*() methods
+    );
+    my @keep;
+    for my $prop (sort keys %KEEP) {
+        my $value = charprop($codepoint, $prop);
+        next unless $value;
+        next if $value eq 'No';
+        push @keep, $prop;
+    }
+#     my $props = charprops_all($codepoint);
+#     for my $prop (sort keys %$props) {
+#         next unless $$props{$prop};
+#         next if $$props{$prop} eq 'No';
+#         push @keep, $prop if $KEEP{$prop};
+#     }
+    return @keep
+}
+
+sub fonts($hex) {
     open my $fh, "-|", "fc-list", "-f", '%{family}\n', ":charset=$hex" or die;
     my %seen;
     while (defined(my $line = <$fh>)) {
