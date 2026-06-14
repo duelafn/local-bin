@@ -14,9 +14,9 @@ BEGIN {
              /,
            keep => "forever",
          );
-  my @options = qw/help|h version verbose|v noact|no-act|dry-run DEBUG
+  my @options = qw/help|h version verbose|v! noact|no-act|dry-run DEBUG
        keep-dirlinks! prune-hidden! prune-rcs! prune-backup!
-       compress! sparse! human! recursive! progress! verbose!
+       compress! sparse! human! recursive! progress!
        copy-unsafe-links! datetime|dt! one_file_system|one-file-system|x!
        exclude=s@ include=s@ bwlimit=i keep=s hash!
        /;
